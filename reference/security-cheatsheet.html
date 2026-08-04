@@ -1,0 +1,223 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Reference</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Security</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="glossary.html">Glossary</a>
+    <a href="#" onclick="window.print();return false">Print</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Security Cheat Sheet</h1>
+<p class="subtitle">Almost everything here is one idea wearing different clothes.</p>
+
+<div class="callout danger" style="margin-top:1.5rem">
+  <span class="label">The law</span>
+  <p style="font-size:1.05rem;line-height:1.5"><strong>Data must never be able to become code.</strong></p>
+  <p>Every injection vulnerability is a failure of that boundary. Learn the shape once and you recognise the whole family — including ones invented after you read this.</p>
+</div>
+
+<h2>The injection family</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Attack</th><th>Data crosses into</th><th>Defence</th><th>Never</th></tr></thead>
+  <tbody>
+    <tr><td>SQL injection</td><td>A database query</td><td>Prepared statements</td><td>Escaping, sanitising, quoting by hand</td></tr>
+    <tr><td>XSS</td><td>HTML output</td><td><code>htmlspecialchars()</code>, per context</td><td>Stripping tags with a denylist</td></tr>
+    <tr><td>Command injection</td><td>A shell command</td><td><code>escapeshellarg()</code>, or avoid the shell</td><td>Concatenating user input into a command</td></tr>
+    <tr><td>Path traversal</td><td>A filesystem path</td><td><code>realpath()</code> + verify the prefix</td><td>Stripping <code>..</code> from the string</td></tr>
+    <tr><td>Header injection</td><td>HTTP headers</td><td>Reject newlines in values</td><td>Passing user input into <code>header()</code></td></tr>
+    <tr><td>Template injection</td><td>A template engine</td><td>Never build templates from input</td><td>Rendering a user-supplied template string</td></tr>
+    <tr><td>LDAP / XPath / NoSQL</td><td>Other query languages</td><td>Parameterised APIs</td><td>String concatenation</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>The pattern in the "Never" column:</strong> every failed defence tries to <em>clean the data</em>. Every working defence <em>separates data from structure</em>, so cleaning is unnecessary.</p>
+
+<h2>SQL injection</h2>
+
+<pre><code><span class="c">// VULNERABLE — the query and the input are one string</span>
+$id = $_GET['id'];
+$db-&gt;query("SELECT * FROM posts WHERE id = $id");
+<span class="c">// ?id=1 OR 1=1          → the whole table</span>
+<span class="c">// ?id=1; DROP TABLE users → gone</span>
+
+<span class="c">// SAFE — two separate journeys</span>
+$db-&gt;query('SELECT * FROM posts WHERE id = :id', ['id' =&gt; $_GET['id']]);</code></pre>
+
+<p><strong>Why separation works:</strong> <code>prepare()</code> sends the SQL template alone; MySQL parses it and fixes the query's structure. <code>execute()</code> then sends values into slots in an already-planned query. They are never parsed as SQL, because parsing already finished.</p>
+
+<div class="callout warn">
+  <span class="label">Placeholders bind values, not identifiers</span>
+  <p>You cannot parameterise a table name, column name, or <code>ORDER BY</code> direction. When those must be dynamic, check against an explicit <strong>allowlist</strong>:</p>
+  <pre style="margin:0.6rem 0"><code>$allowed = ['title', 'created_at', 'id'];
+$sort = in_array($_GET['sort'] ?? '', $allowed, true) ? $_GET['sort'] : 'id';
+$dir  = ($_GET['dir'] ?? '') === 'desc' ? 'DESC' : 'ASC';
+$db->query("SELECT * FROM posts ORDER BY {$sort} {$dir}");</code></pre>
+  <p>Safe because the interpolated values can only ever be strings you wrote. Never validate this with a regex.</p>
+</div>
+
+<h2>XSS — escape per context</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Context</th><th>Correct escaping</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;p&gt;HERE&lt;/p&gt;</code></td><td><code>htmlspecialchars($v, ENT_QUOTES, 'UTF-8')</code></td></tr>
+    <tr><td><code>value="HERE"</code></td><td>Same — <strong>and quote the attribute</strong></td></tr>
+    <tr><td><code>?q=HERE</code></td><td><code>urlencode($v)</code></td></tr>
+    <tr><td><code>&lt;script&gt;var x = HERE&lt;/script&gt;</code></td><td><code>json_encode($v, JSON_HEX_TAG|JSON_HEX_AMP)</code></td></tr>
+    <tr><td><code>href="HERE"</code></td><td>Escape <em>and</em> allowlist the scheme — <code>javascript:</code> is a valid URL</td></tr>
+    <tr><td>Inside CSS</td><td>Don't. Use a class name</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><code>htmlspecialchars</code> does <strong>not</strong> protect inside a <code>&lt;script&gt;</code> block — HTML entities aren't decoded there, and <code>&lt;/script&gt;</code> inside a JS string still closes the tag.</p>
+
+<p>You do not need a <code>&lt;script&gt;</code> tag to run JavaScript: <code>&lt;img src=x onerror=…&gt;</code> is enough. This is why writing your own HTML sanitiser is a mistake — use <a href="https://github.com/ezyang/htmlpurifier">HTMLPurifier</a>, or accept Markdown instead of HTML.</p>
+
+<h2>CSRF</h2>
+
+<p>A third-party page causes the user's browser to submit a request to your site. The browser attaches cookies automatically, so the request is fully authenticated — the attacker never needs to see the response.</p>
+
+<pre><code><span class="c">// generate once per session</span>
+$_SESSION['csrf'] ??= bin2hex(random_bytes(32));
+
+<span class="c">// in every state-changing form</span>
+&lt;input type="hidden" name="_token" value="&lt;?= e($_SESSION['csrf']) ?&gt;"&gt;
+
+<span class="c">// verify before acting — timing-safe comparison</span>
+if (! hash_equals($_SESSION['csrf'], $_POST['_token'] ?? '')) {
+    abort(419);
+}</code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td>Token</td><td>Unpredictable, bound to the session, verified on every state change</td></tr>
+    <tr><td><code>SameSite=Lax</code></td><td>Browser withholds the cookie on cross-site POSTs. Good default, not sufficient alone</td></tr>
+    <tr><td>Verbs</td><td>Never change state on <code>GET</code> — that's what makes the attack trivial</td></tr>
+    <tr><td><code>hash_equals</code></td><td>Constant-time. <code>===</code> leaks length and prefix through timing</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Authentication</h2>
+
+<pre><code>$hash = password_hash($plain, PASSWORD_DEFAULT);   <span class="c">// bcrypt/argon2, salt included</span>
+
+if (password_verify($plain, $user['password'])) {
+    session_regenerate_id(true);                   <span class="c">// prevents session fixation</span>
+    $_SESSION['user_id'] = $user['id'];
+}</code></pre>
+
+<div class="callout danger">
+  <span class="label">Non-negotiable</span>
+  <p><strong>Never</strong> <code>md5</code>, <code>sha1</code>, or <code>sha256</code> for passwords — they are designed to be <em>fast</em>, which is exactly wrong. <strong>Never</strong> your own salting scheme; <code>password_hash</code> generates and stores the salt for you. <strong>Never</strong> <code>===</code> on hashes — use <code>password_verify</code>.</p>
+  <p>Store the hash in <code>VARCHAR(255)</code>, not 60 — the algorithm's output length changes between PHP versions, and a too-short column silently truncates, locking everyone out.</p>
+</div>
+
+<h2>Sessions</h2>
+
+<pre><code>session_set_cookie_params([
+    'httponly' =&gt; true,      <span class="c">// JavaScript cannot read it — blunts XSS cookie theft</span>
+    'secure'   =&gt; true,      <span class="c">// HTTPS only</span>
+    'samesite' =&gt; 'Lax',     <span class="c">// CSRF mitigation</span>
+    'path'     =&gt; '/',
+]);
+session_start();</code></pre>
+
+<p>Regenerate the id on login and on privilege change. Destroy it fully on logout — <code>session_destroy()</code> plus clearing <code>$_SESSION</code> plus expiring the cookie.</p>
+
+<h2>Authentication vs authorization</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><strong>Authentication</strong></td><td><em>Who are you?</em></td><td>Login, sessions, tokens</td><td><code>401</code></td></tr>
+    <tr><td><strong>Authorization</strong></td><td><em>May you do this?</em></td><td>Ownership, roles, permissions</td><td><code>403</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code>$note = $db-&gt;query('SELECT * FROM notes WHERE id = :id', ['id' =&gt; $id])-&gt;fetch();
+
+if (! $note)                                  { abort(404); }   <span class="c">// does not exist</span>
+if ((int) $note['user_id'] !== $currentUserId) { abort(403); }   <span class="c">// not yours</span></code></pre>
+
+<p><strong>IDOR</strong> — Insecure Direct Object Reference — is what you get without that second check. Change the id in the URL, read someone else's data. The fix is checking ownership on every request; it is never hiding or obfuscating the id.</p>
+
+<div class="callout warn">
+  <span class="label">403 or 404? A real trade-off</span>
+  <p>Returning <code>403</code> tells an attacker the record <em>exists</em>. For a notes app that leak is trivial and 403 is clearer. For anything where existence itself is sensitive — medical records, private repositories, HR files — return <code>404</code> for both and log the distinction internally. GitHub does exactly this.</p>
+  <p>Also note the <code>(int)</code> cast: with PDO emulating prepares, integer columns arrive as strings, and <code>'1' !== 1</code> would reject the rightful owner.</p>
+</div>
+
+<h2>Configuration and secrets</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td>Secrets in <code>.env</code></td><td>Never committed. <code>.env.example</code> with dummy values <em>is</em> committed</td></tr>
+    <tr><td><code>.env</code> outside the web root</td><td>Or unreachable by URL. Leaked <code>.env</code> files are a top cause of breaches</td></tr>
+    <tr><td><code>chmod 600</code></td><td>Only the owner may read it</td></tr>
+    <tr><td><code>display_errors=Off</code> in production</td><td>Stack traces leak paths, queries, sometimes credentials</td></tr>
+    <tr><td>Rotate on exposure</td><td>A secret that reached a git history is compromised — even after a force-push</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Headers worth sending</h2>
+
+<pre><code>header("Content-Security-Policy: default-src 'self'");
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Strict-Transport-Security: max-age=31536000; includeSubDomains');</code></pre>
+
+<p>CSP is defence in depth: even if you miss an escape, the browser refuses to run injected inline script. Worth adding once and keeping.</p>
+
+<h2>Pre-deploy checklist</h2>
+
+<ul>
+  <li>Every query parameterised — no user input in any SQL string, anywhere</li>
+  <li>Every user-derived output escaped, with the right function for its context</li>
+  <li>Every state-changing form carries and verifies a CSRF token</li>
+  <li>Every record fetched by id is ownership-checked before rendering</li>
+  <li>Passwords via <code>password_hash</code> / <code>password_verify</code>; column is <code>VARCHAR(255)</code></li>
+  <li>Session cookie is <code>httponly</code>, <code>secure</code>, <code>samesite</code>; id regenerated on login</li>
+  <li><code>display_errors</code> off, <code>log_errors</code> on, error log monitored</li>
+  <li>Only <code>public/</code> is inside the document root</li>
+  <li><code>.env</code> not committed, not readable, permissions <code>600</code></li>
+  <li>No destructive action reachable by <code>GET</code></li>
+  <li>File uploads: validate by content, store outside the web root, never trust the filename</li>
+  <li>Dependencies audited — <code>composer audit</code></li>
+</ul>
+
+<div class="source">
+  <span class="label">Where to go deeper</span>
+  <a href="https://owasp.org/www-project-top-ten/">OWASP Top Ten</a> for what actually breaks applications, and the <a href="https://cheatsheetseries.owasp.org/">OWASP Cheat Sheet Series</a> for authoritative per-topic guidance. These are the industry's reference, not a blogger's opinion.
+</div>
+
+<footer class="lesson-foot">
+  <div class="nextprev">
+    <a href="sql-cheatsheet.html">← SQL cheat sheet</a>
+    <a href="../START-HERE.html">Syllabus →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

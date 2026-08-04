@@ -1,0 +1,342 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0007 — Web Server vs Application Runtime</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0007</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Web Server vs Application Runtime</h1>
+<p class="subtitle">Two programs, not one. Knowing where the boundary sits explains 502s, <code>.htaccess</code>, the front controller pattern, and why <code>php -S</code> must never see production traffic.</p>
+
+<div class="meta"><span>45 minutes</span><span>Win: what nginx does that <code>php -S</code> doesn't</span></div>
+
+<p>Your course used <code>php -S</code> and noted, correctly, that it is "a development convenience, not built for production traffic". Here is what that sentence is hiding — and it is the piece of the stack that most working PHP developers never quite learn.</p>
+
+<h2>The fork in the road</h2>
+
+<p>Every request that reaches a web server hits one decision:</p>
+
+<figure>
+<svg viewBox="0 0 580 200" role="img" aria-label="A request either maps to a file on disk or is proxied to an application runtime">
+  <rect x="0" y="70" width="86" height="34" rx="3" class="svg-box"/>
+  <text x="43" y="91" class="svg-label" text-anchor="middle">request</text>
+  <path d="M90 87 L 122 87" class="svg-stroke" marker-end="url(#d)"/>
+
+  <rect x="126" y="62" width="118" height="50" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="185" y="82" class="svg-label" text-anchor="middle">nginx / Apache</text>
+  <text x="185" y="98" class="svg-small" text-anchor="middle">does a file exist here?</text>
+
+  <path d="M248 76 C 280 76, 280 40, 312 40" class="svg-stroke" marker-end="url(#d)"/>
+  <text x="258" y="34" class="svg-small">yes</text>
+  <rect x="316" y="22" width="150" height="36" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+  <text x="391" y="38" class="svg-label" text-anchor="middle">send the bytes</text>
+  <text x="391" y="51" class="svg-small" text-anchor="middle">images, CSS, JS — microseconds</text>
+
+  <path d="M248 98 C 280 98, 280 140, 312 140" class="svg-stroke" marker-end="url(#d)"/>
+  <text x="258" y="140" class="svg-small">no</text>
+  <rect x="316" y="122" width="150" height="36" rx="3" class="svg-box" style="stroke:var(--link)"/>
+  <text x="391" y="138" class="svg-label" text-anchor="middle">hand it to a runtime</text>
+  <text x="391" y="151" class="svg-small" text-anchor="middle">PHP-FPM, Node, Python</text>
+
+  <path d="M470 140 L 500 140" class="svg-stroke" marker-end="url(#d)"/>
+  <rect x="504" y="122" width="72" height="36" rx="3" class="svg-box"/>
+  <text x="540" y="144" class="svg-label" text-anchor="middle">your code</text>
+
+  <text x="126" y="180" class="svg-small">this single decision is what a web server configuration file is for —</text>
+  <text x="126" y="192" class="svg-small">everything else (TLS, compression, logging, rate limits) is decoration on it</text>
+
+  <defs>
+    <marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>Static or dynamic. The web server is extremely good at the first and deliberately incapable of the second — it does not know what PHP is and never executes anything.</figcaption>
+</figure>
+
+<h2>Why two programs at all?</h2>
+
+<p>Because the two jobs have opposite requirements, and Lesson 0004 already showed you why.</p>
+
+<p>Serving a file is I/O-bound and trivial: thousands of concurrent, mostly-idle connections. That is exactly what an <strong>event loop</strong> is good at, and it is what nginx is. Running your code is CPU-bound and stateful, needs isolation so one crash cannot take down the rest, and PHP's shared-nothing model wants a fresh world per request. That is what a <strong>process pool</strong> is good at, and it is what PHP-FPM is.</p>
+
+<p>So the production stack uses each for what it is good at, and connects them with a fast local socket.</p>
+
+<div class="callout foundation">
+  <span class="label">Foundation — CGI, FastCGI, and where PHP-FPM came from</span>
+  <p><strong>CGI (1993).</strong> The original answer: for each dynamic request, the web server forks a brand-new process, passes the request as <em>environment variables</em>, and reads the response from its stdout. Beautifully simple. Catastrophically slow — a whole process spawn per request.</p>
+  <p><strong>FastCGI.</strong> Same idea, one fix: keep the processes alive and talk to them over a persistent socket using a small binary protocol. No spawn per request.</p>
+  <p><strong>PHP-FPM</strong> — FastCGI Process Manager — is PHP's implementation: a supervisor holding a pool of PHP workers, restarting them when they die or after N requests, and scaling the pool under load.</p>
+  <p><strong>And here is the payoff:</strong> those CGI environment variables never went away. <code>REQUEST_METHOD</code>, <code>QUERY_STRING</code>, <code>REQUEST_URI</code>, <code>HTTP_USER_AGENT</code> — the exact keys you saw in <code>$_SERVER</code> in Lesson 0005 — are the CGI variable names from 1993. Every time you read <code>$_SERVER</code>, you are reading a thirty-year-old interface between two separate programs. That is why the naming is so strange, and why headers get mangled into <code>HTTP_</code> + uppercase.</p>
+</div>
+
+<div class="callout warn">
+  <span class="label">Reading the errors this creates</span>
+  <p>Two programs connected by a socket means a new class of failure that has nothing to do with your code:</p>
+  <p><strong>502 Bad Gateway</strong> — nginx could not reach PHP-FPM, or got garbage back. PHP-FPM is stopped, or the socket path in your nginx config doesn't match the one in the pool config. Check <code>systemctl status php8.4-fpm</code> first, always.</p>
+  <p><strong>504 Gateway Timeout</strong> — nginx connected fine and waited longer than <code>fastcgi_read_timeout</code>. Your code is genuinely too slow, or it is hung on a query or an external API.</p>
+  <p><strong>Blank white page, HTTP 200</strong> — PHP hit a fatal error with <code>display_errors</code> off. The real message is in the PHP-FPM error log, not nginx's. Knowing <em>which</em> of the two logs to open is most of the diagnosis.</p>
+</div>
+
+<h2>The routing game</h2>
+
+<p>This is a simplified but faithful nginx <code>try_files</code>. Type a request path and watch the server decide. Note especially what happens to <code>/notes/17</code>.</p>
+
+<div class="widget" id="nginx">
+  <div class="widget-title">nginx — request routing</div>
+
+  <div style="display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))">
+    <div>
+      <h4 style="margin-top:0">Config</h4>
+      <pre style="margin:0;font-size:0.74rem"><code>root /var/www/public;
+index index.php;
+
+location / {
+  try_files $uri $uri/ /index.php;
+}
+
+location ~ \.php$ {
+  fastcgi_pass php-fpm:9000;
+}</code></pre>
+      <h4>Files on disk</h4>
+      <pre style="margin:0;font-size:0.74rem"><code>/var/www/public/
+  index.php
+  style.css
+  logo.png
+  about.html
+  uploads/
+    cat.jpg</code></pre>
+    </div>
+    <div>
+      <h4 style="margin-top:0">Request</h4>
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.5rem" id="ng-presets"></div>
+      <input type="text" id="ng-input" value="/notes/17" spellcheck="false">
+      <div id="ng-out" style="margin-top:0.8rem"></div>
+    </div>
+  </div>
+</div>
+
+<div class="callout win">
+  <span class="label">You have just seen the front controller, from the server's side</span>
+  <p><code>try_files $uri $uri/ /index.php</code> reads as: <em>try the path as a file; then as a directory; and if neither exists, give up and hand everything to <code>index.php</code>.</em></p>
+  <p>That last fallback is what makes clean URLs possible. There is no file at <code>/notes/17</code> and there never will be — nginx gives up, <code>index.php</code> runs, and <strong>your PHP decides what <code>/notes/17</code> means</strong> by reading <code>$_SERVER['REQUEST_URI']</code>.</p>
+  <p>Your course said PHP's built-in server "does something close enough by default: it serves a file if one matches, and otherwise falls back to <code>index.php</code>." Now you know exactly which production directive it is imitating — and that in Apache the same thing is a <code>mod_rewrite</code> rule in <code>.htaccess</code>, which is the mechanism WordPress permalinks are built on.</p>
+</div>
+
+<h2>Why <code>php -S</code> must not face the public</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th></th><th><code>php -S</code></th><th>nginx + PHP-FPM</th></tr></thead>
+  <tbody>
+    <tr><td>Concurrency</td><td>One request at a time by default</td><td>Thousands of connections, a pool of workers</td></tr>
+    <tr><td>Static files</td><td>Served by PHP itself — slowly</td><td>Served by the kernel via <code>sendfile</code></td></tr>
+    <tr><td>TLS</td><td>None. No HTTPS at all</td><td>Terminates TLS, manages certificates</td></tr>
+    <tr><td>Crash isolation</td><td>The process dies; the site is down</td><td>FPM restarts the worker; nobody notices</td></tr>
+    <tr><td>Slow clients</td><td>Occupies the only worker</td><td>Buffered by nginx; PHP is never exposed to them</td></tr>
+    <tr><td>Limits</td><td>None — no timeouts, no body caps, no rate limits</td><td>Configurable at every layer</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The upstream documentation states it flatly: the built-in server "is not intended to be a full-featured web server. It should not be used on a public network." That is not caution — a single slow client stalls your entire site, which you demonstrated yourself with <code>sleep(5)</code> in Lesson 0004.</p>
+
+<div class="callout warn">
+  <span class="label">Install checkpoint 4 — optional, and genuinely worth it once</span>
+  <p>You do not need this for any lesson or project. But wiring nginx to PHP-FPM <em>by hand</em>, once, converts this lesson from a diagram into something you have actually operated — and it is the single most under-explained piece of the PHP stack.</p>
+  <pre style="margin:0.6rem 0"><code>sudo apt install -y nginx php-fpm
+sudo service php8.5-fpm start
+sudo service nginx start
+
+<span class="c"># the two halves that must agree — compare the socket paths</span>
+grep -r 'listen' /etc/php/8.5/fpm/pool.d/www.conf | head -3
+grep -rn 'fastcgi_pass' /etc/nginx/</code></pre>
+  <p>Those two paths matching is the entire difference between a working site and <strong>502 Bad Gateway</strong>. Note that installing <code>php-fpm</code> adds a <em>second</em> SAPI alongside <code>php-cli</code> — same engine, different front door, <strong>and its own <code>php.ini</code></strong> at <code>/etc/php/8.5/fpm/php.ini</code>. That is Lesson 0000's "works in the terminal but not the browser" made concrete.</p>
+  <p>Ask me to walk you through the vhost config when you get here — it is fiddly, and doing it with help beats copy-pasting a snippet you can't read.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l7">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "A request for <code>/logo.png</code> arrives. Which program reads the file off disk?",
+      "options": [
+        "nginx, directly — PHP is never involved",
+        "PHP-FPM, which streams it back to nginx",
+        "The kernel, after PHP opens the file",
+        "nginx, after asking PHP where it lives"
+      ],
+      "answer": 0,
+      "why": "The file exists, so <code>try_files</code> matches on the first attempt and nginx serves it itself — typically with <code>sendfile()</code>, which copies from disk to socket entirely inside the kernel without the bytes ever entering userspace. Routing static assets through PHP is a common and expensive misconfiguration."
+    },
+    {
+      "q": "You deploy and every page returns 502. What do you check first?",
+      "options": [
+        "Whether PHP-FPM is running and its socket path matches",
+        "Whether your PHP code throws an uncaught exception",
+        "Whether the database has exhausted its connections",
+        "Whether nginx has permission to read the web root"
+      ],
+      "answer": 0,
+      "why": "502 means nginx could not get a usable answer from upstream — the failure is in the <em>connection</em>, before your code runs. A crashing application gives 500; a slow one gives 504. Checking FPM's status and comparing the socket paths in both config files resolves this the overwhelming majority of the time."
+    },
+    {
+      "q": "Where do <code>$_SERVER</code>'s odd key names actually come from?",
+      "options": [
+        "The CGI specification of the early 1990s",
+        "PHP's own internal request parser",
+        "The HTTP/1.1 specification's header rules",
+        "Apache's module API for request handling"
+      ],
+      "answer": 0,
+      "why": "CGI passed the request to a child process as environment variables, so it needed names that were legal in a shell environment — uppercase, underscores, an <code>HTTP_</code> prefix for headers. FastCGI kept the same variable names, and PHP still surfaces them verbatim thirty years later."
+    },
+    {
+      "q": "<code>try_files $uri $uri/ /index.php</code> — what does the final argument accomplish?",
+      "options": [
+        "Any unmatched path is handled by your application",
+        "Requests for directories get a listing page",
+        "Missing files return 404 from nginx directly",
+        "PHP files are executed rather than downloaded"
+      ],
+      "answer": 0,
+      "why": "It is the front controller fallback. Because no file exists at <code>/notes/17</code>, nginx routes it to <code>index.php</code> and your router decides its meaning. Remove that argument and every clean URL in your application 404s — a genuinely common deployment mistake."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — the same boundary, in every stack you named</span>
+  <p><strong>WordPress</strong> ships an <code>.htaccess</code> whose rewrite rules are Apache's version of <code>try_files</code> — which is why "permalinks broke after moving hosts" is always a rewrite-rule problem, never a WordPress one.</p>
+  <p><strong>Laravel and Symfony</strong> both put <code>public/index.php</code> as the document root, with everything else above it. Same pattern, same reason.</p>
+  <p><strong>Next.js and Vite</strong> keep the boundary but move it: static assets from a CDN edge, dynamic routes to a function. Vercel's whole build output is a manifest describing exactly this static-or-dynamic decision, per route.</p>
+  <p><strong>Cloudflare Workers</strong> collapse it — your code <em>is</em> the server, running in the event loop rather than behind it, which is why blocking work is forbidden there.</p>
+  <p>The vocabulary changes. The decision does not.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Trace a request for <code>/notes/17</code> from the socket to your controller, on a real nginx + PHP-FPM server. Name each program, what it decides, and how the request is handed on.",
+  "answer": "<p>(1) <strong>nginx</strong> accepts the TCP connection and terminates TLS. (2) It matches <code>location /</code> and runs <code>try_files</code>: is there a file at <code>/var/www/public/notes/17</code>? No. A directory? No. So it falls through to <code>/index.php</code>. (3) The rewritten path matches <code>location ~ \\.php$</code>, so nginx opens a connection to <strong>PHP-FPM</strong> over a Unix socket or TCP:9000 and speaks the <strong>FastCGI</strong> binary protocol, packing the request into CGI-style variables — <code>REQUEST_URI=/notes/17</code>, <code>SCRIPT_FILENAME=/var/www/public/index.php</code>, and so on. (4) The FPM <strong>master</strong> hands the request to an idle <strong>worker</strong>. (5) The worker populates <code>$_SERVER</code> from those variables and executes <code>index.php</code> — your front controller, which reads <code>REQUEST_URI</code> and dispatches to a controller. (6) Output goes back over FastCGI to nginx, which adds its own headers and writes to the client socket. (7) The worker is reset to a clean state, ready for the next request.</p><p>The key point: <strong>nginx never knew what <code>/notes/17</code> meant.</strong> It only knew no file was there — and that ignorance is precisely what hands you the routing decision.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.php.net/manual/en/install.fpm.php">PHP Manual — FastCGI Process Manager</a>, then nginx's own <a href="https://nginx.org/en/docs/http/ngx_http_core_module.html#try_files">try_files directive</a>. Both are short reference pages; read them as the primary definition rather than trusting the copy-pasted config snippets that circulate on blogs.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0007" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"install nginx + php-fpm in this WSL and wire it to my demo project"</em> — doing that once, by hand, is worth a great deal, and you have the whole afternoon's context for it. Also good: <em>"explain pm.max_children and how to size an FPM pool"</em>, or <em>"what's the difference between mod_php and FPM under Apache?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0006-url-to-pixels.html">← 0006 — From URL to Pixels</a>
+    <a href="../projects/01-http-server.html">Project 1 — An HTTP server from raw sockets →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const FILES = new Set([
+      "/index.php", "/style.css", "/logo.png", "/about.html", "/uploads/cat.jpg",
+    ]);
+    const DIRS = new Set(["/", "/uploads"]);
+
+    const input = document.getElementById("ng-input");
+    const out = document.getElementById("ng-out");
+    const presets = document.getElementById("ng-presets");
+
+    const step = (text, verdict) => {
+      const colour = verdict === "hit" ? "var(--ok)" : verdict === "miss" ? "var(--ink-faint)" : "var(--accent)";
+      const mark = verdict === "hit" ? "✓" : verdict === "miss" ? "✕" : "→";
+      return `<div style="display:flex;gap:0.5rem;font-family:var(--mono);font-size:0.76rem;margin:0.18rem 0;color:${colour}">
+        <span>${mark}</span><span>${text}</span></div>`;
+    };
+
+    const evaluate = (raw) => {
+      const path = (raw.split("?")[0] || "/").replace(/\/{2,}/g, "/");
+      const steps = [];
+
+      if (path.endsWith(".php")) {
+        steps.push(step(`location ~ \\.php$ matched before location /`, "note"));
+        if (FILES.has(path)) {
+          steps.push(step(`fastcgi_pass → PHP-FPM executes ${path}`, "hit"));
+          return { steps, verdict: "PHP-FPM", detail: "Executed as code, not sent as text. If this location block were missing, nginx would serve your source — including database passwords." };
+        }
+        steps.push(step(`no such script — PHP-FPM reports "Primary script unknown"`, "miss"));
+        return { steps, verdict: "404", detail: "A missing .php file is a 404 from FPM, not from nginx — a small but useful distinction when reading logs." };
+      }
+
+      steps.push(step(`try_files, argument 1: is "${path}" a file?`, FILES.has(path) ? "hit" : "miss"));
+      if (FILES.has(path)) {
+        return { steps, verdict: "static file", detail: "nginx sends the bytes itself, typically via sendfile(). PHP is never started. This is the fast path, and it is why static assets belong in the web root." };
+      }
+
+      const asDir = path.replace(/\/$/, "") || "/";
+      const shown = asDir === "/" ? "/" : `${asDir}/`;
+      steps.push(step(`try_files, argument 2: is "${shown}" a directory?`, DIRS.has(asDir) ? "hit" : "miss"));
+      if (DIRS.has(asDir)) {
+        steps.push(step(`directory found → look for index.php inside it`, "note"));
+        return { steps, verdict: "PHP-FPM", detail: "The index convention from your course, implemented. The server looks for the configured index file inside the directory." };
+      }
+
+      steps.push(step(`try_files, argument 3: fall back to /index.php`, "hit"));
+      steps.push(step(`REQUEST_URI is still "${raw}" — nothing was rewritten for PHP`, "note"));
+      return {
+        steps,
+        verdict: "PHP-FPM (front controller)",
+        detail: "No file, no directory — so your application decides what this URL means. Crucially, REQUEST_URI still holds the original path, which is exactly what your router reads.",
+      };
+    };
+
+    const paint = () => {
+      const { steps, verdict, detail } = evaluate(input.value.trim() || "/");
+      const colour = verdict === "404" ? "var(--bad)" : verdict === "static file" ? "var(--ok)" : "var(--link)";
+      out.innerHTML =
+        steps.join("") +
+        `<div style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px solid var(--rule)">
+          <div style="font-family:var(--mono);font-size:0.95rem;color:${colour}">${verdict}</div>
+          <p style="font-size:0.78rem;line-height:1.5;color:var(--ink-soft);margin:0.35rem 0 0">${detail}</p>
+        </div>`;
+    };
+
+    for (const preset of ["/", "/style.css", "/notes/17", "/uploads/", "/index.php", "/missing.php", "/about.html"]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = preset;
+      button.style.fontFamily = "var(--mono)";
+      button.style.fontSize = "0.72rem";
+      button.addEventListener("click", () => { input.value = preset; paint(); });
+      presets.append(button);
+    }
+
+    input.addEventListener("input", paint);
+    paint();
+  })();
+</script>

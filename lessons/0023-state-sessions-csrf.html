@@ -1,0 +1,348 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0023 — State: Cookies, Sessions, POST, CSRF</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0023</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/security-cheatsheet.html">Security sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>State: Cookies, Sessions, POST, CSRF</h1>
+<p class="subtitle">Your course stopped before all of this and said so honestly. It is the largest gap, and it is where the most dangerous mistakes live.</p>
+
+<div class="meta"><span>55 minutes</span><span>Win: how a stateless protocol remembers you</span></div>
+
+<p>HTTP has no memory. Each request arrives knowing nothing about any previous one. So how does a site know you are logged in?</p>
+
+<p>It doesn't. <strong>Your browser tells it, every single time.</strong></p>
+
+<h2>The mechanism, in four steps</h2>
+
+<figure>
+<svg viewBox="0 0 580 168" role="img" aria-label="Login sets a session cookie; subsequent requests resend it and the server looks up the session">
+  <text x="0" y="12" class="svg-label" style="font-weight:650">1 · login</text>
+  <rect x="0" y="20" width="86" height="26" rx="3" class="svg-box"/>
+  <text x="43" y="37" class="svg-label" text-anchor="middle">browser</text>
+  <path d="M90 33 L 200 33" class="svg-stroke" marker-end="url(#i)"/>
+  <text x="96" y="27" class="svg-mono">POST /login  email + password</text>
+  <rect x="204" y="20" width="86" height="26" rx="3" class="svg-box"/>
+  <text x="247" y="37" class="svg-label" text-anchor="middle">server</text>
+  <text x="300" y="30" class="svg-small">verifies the hash, creates a session</text>
+  <text x="300" y="42" class="svg-small">record on the server keyed by a random id</text>
+
+  <text x="0" y="66" class="svg-label" style="font-weight:650">2 · the key comes back</text>
+  <path d="M200 84 L 90 84" class="svg-stroke" marker-end="url(#i)"/>
+  <text x="96" y="78" class="svg-mono">Set-Cookie: PHPSESSID=a3f9…; HttpOnly</text>
+  <text x="300" y="84" class="svg-small">the cookie holds the KEY, never the data</text>
+
+  <text x="0" y="112" class="svg-label" style="font-weight:650">3 · every later request</text>
+  <path d="M90 130 L 200 130" class="svg-stroke" marker-end="url(#i)"/>
+  <text x="96" y="124" class="svg-mono">GET /notes   Cookie: PHPSESSID=a3f9…</text>
+  <text x="300" y="124" class="svg-small">the browser attaches it automatically —</text>
+  <text x="300" y="136" class="svg-small">which is exactly what makes CSRF possible</text>
+
+  <text x="0" y="160" class="svg-small">4 · the server looks up session a3f9… → user_id 1 → and it "remembers" you</text>
+
+  <defs>
+    <marker id="i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>The cookie carries a <strong>random identifier</strong>, not your identity. All the actual data lives server-side, in <code>$_SESSION</code>. This is why session data can be large and secret, and why the cookie itself is worthless to read — but catastrophic to steal.</figcaption>
+</figure>
+
+<h2>Doing it correctly</h2>
+
+<pre><code>session_set_cookie_params([
+    <span class="s">'httponly'</span> =&gt; <span class="k">true</span>,     <span class="c">// JavaScript cannot read it — blunts XSS cookie theft</span>
+    <span class="s">'secure'</span>   =&gt; <span class="k">true</span>,     <span class="c">// HTTPS only, never sent in clear</span>
+    <span class="s">'samesite'</span> =&gt; <span class="s">'Lax'</span>,    <span class="c">// withheld on cross-site POSTs — CSRF mitigation</span>
+    <span class="s">'path'</span>     =&gt; <span class="s">'/'</span>,
+]);
+session_start();
+
+<span class="c">// on successful login</span>
+session_regenerate_id(<span class="k">true</span>);          <span class="c">// prevents session fixation</span>
+<span class="n">$_SESSION</span>[<span class="s">'user_id'</span>] = <span class="n">$user</span>[<span class="s">'id'</span>];</code></pre>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Why <code>session_regenerate_id</code> matters</span>
+  <p><span class="term">Session fixation</span>: an attacker visits your site, gets a session id, then tricks a victim into using <em>that same id</em> — via a link like <code>?PHPSESSID=known</code>, or by setting the cookie from a subdomain they control. The victim logs in. The session the attacker already holds is now an authenticated session.</p>
+  <p>Regenerating the id at the moment of login destroys the old one, so whatever the attacker holds becomes worthless. One line, and it closes an entire attack class. Do it on every privilege change, not only login.</p>
+</div>
+
+<h2>Passwords</h2>
+
+<pre><code><span class="n">$hash</span> = password_hash(<span class="n">$plain</span>, PASSWORD_DEFAULT);   <span class="c">// salt generated and stored for you</span>
+
+<span class="k">if</span> (password_verify(<span class="n">$plain</span>, <span class="n">$user</span>[<span class="s">'password'</span>])) { … }</code></pre>
+
+<div class="callout danger">
+  <span class="label">Four things that are simply not negotiable</span>
+  <p><strong>Never <code>md5</code>, <code>sha1</code> or <code>sha256</code>.</strong> They are designed to be <em>fast</em>, which is exactly backwards — a modern GPU tries billions of sha256 guesses per second. <code>password_hash</code> uses bcrypt or argon2, which are deliberately slow and memory-hard.</p>
+  <p><strong>Never your own salting scheme.</strong> <code>password_hash</code> generates a random salt and stores it inside the hash string. There is nothing for you to manage.</p>
+  <p><strong>Never <code>===</code> on hashes.</strong> Use <code>password_verify</code>, which is constant-time. String comparison returns faster on an early mismatch, and that timing is measurable.</p>
+  <p><strong>Column must be <code>VARCHAR(255)</code>.</strong> Not 60. The algorithm's output length changes between PHP versions, and a too-short column truncates silently — locking every user out with no error anywhere.</p>
+</div>
+
+<h2>POST, and the refresh problem</h2>
+
+<p>Everything your course did was <code>GET</code>. Forms need <code>POST</code>, and <code>POST</code> brings a problem you have certainly seen:</p>
+
+<pre><code><span class="c">// naive: render the result directly from the POST handler</span>
+<span class="k">if</span> (<span class="n">$request</span>-&gt;method === <span class="s">'POST'</span>) {
+    <span class="n">$db</span>-&gt;query(<span class="s">'INSERT INTO notes (user_id, body) VALUES (?, ?)'</span>, [<span class="n">$uid</span>, <span class="n">$body</span>]);
+    <span class="k">echo</span> view(<span class="s">'notes/index'</span>, [...]);       <span class="c">// ← refresh re-submits!</span>
+}</code></pre>
+
+<p>The browser remembers the last request. Refresh, and it re-sends the POST — creating a second note. Hit back, and you get "Confirm Form Resubmission". On a checkout page this is a double charge.</p>
+
+<h3>Post/Redirect/Get</h3>
+
+<pre><code><span class="k">if</span> (<span class="n">$request</span>-&gt;method === <span class="s">'POST'</span>) {
+    <span class="n">$db</span>-&gt;query(<span class="s">'INSERT INTO notes (user_id, body) VALUES (?, ?)'</span>, [<span class="n">$uid</span>, <span class="n">$body</span>]);
+
+    <span class="n">$_SESSION</span>[<span class="s">'flash'</span>] = <span class="s">'Note created'</span>;
+
+    header(<span class="s">'Location: /notes'</span>, <span class="k">true</span>, 303);
+    exit;                                     <span class="c">// nothing after a redirect</span>
+}</code></pre>
+
+<p>The response to the POST is a redirect, so the page the user ends on was reached by <code>GET</code>. Refreshing repeats the <em>GET</em> — harmless. This is why <span class="term">flash messages</span> exist: the success message must survive one redirect, so it goes in the session and is deleted after being read once.</p>
+
+<p><code>303 See Other</code> is the strictly correct status: it tells the browser to follow with <code>GET</code> regardless of the original method. <code>302</code> works in practice because browsers do the same thing anyway.</p>
+
+<h2>CSRF — the attack that needs no access to your site</h2>
+
+<div class="widget" id="csrf">
+  <div class="widget-title">CSRF — you are visiting a malicious page</div>
+  <p style="font-size:0.82rem;color:var(--ink-soft);margin:0 0 0.7rem">
+    You're logged into <code>bank.example</code> in one tab. In another, you open a forum post containing this:
+  </p>
+  <pre style="margin:0 0 0.8rem;font-size:0.74rem"><code>&lt;!-- evil.example --&gt;
+&lt;form action="https://bank.example/transfer" method="POST" id="f"&gt;
+  &lt;input type="hidden" name="to"     value="attacker"&gt;
+  &lt;input type="hidden" name="amount" value="5000"&gt;
+&lt;/form&gt;
+&lt;script&gt;document.getElementById('f').submit();&lt;/script&gt;</code></pre>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;margin-bottom:0.8rem" class="controls">
+    <button type="button" id="csrf-go" class="primary">Open the malicious page ▸</button>
+    <button type="button" id="csrf-reset">Reset</button>
+    <label style="display:flex;gap:0.35rem;align-items:center;font-family:var(--sans);font-size:0.78rem">
+      <input type="checkbox" id="csrf-token" style="width:auto"> bank verifies a CSRF token
+    </label>
+    <label style="display:flex;gap:0.35rem;align-items:center;font-family:var(--sans);font-size:0.78rem">
+      <input type="checkbox" id="csrf-samesite" style="width:auto"> cookie is <code>SameSite=Lax</code>
+    </label>
+  </div>
+  <div id="csrf-log" class="term-shell" style="height:11rem"></div>
+  <p id="csrf-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.9rem 0 0"></p>
+</div>
+
+<div class="callout danger">
+  <span class="label">Why it works</span>
+  <p><strong>The browser attaches cookies based on the destination, not the origin.</strong> A request to <code>bank.example</code> gets <code>bank.example</code>'s cookies — regardless of which page caused it. So the forged request is fully authenticated.</p>
+  <p>The attacker never sees the response. They do not need to. <em>Causing</em> the action is the whole attack.</p>
+  <p>Note what does <strong>not</strong> help: HTTPS (the request is legitimately encrypted), checking the session (there genuinely is one), rate limiting, or a strong password.</p>
+</div>
+
+<h2>The defence</h2>
+
+<pre><code><span class="c">// once per session</span>
+<span class="n">$_SESSION</span>[<span class="s">'csrf'</span>] ??= bin2hex(random_bytes(32));
+
+<span class="c">// in every state-changing form</span>
+&lt;input type="hidden" name="_token" value="&lt;?= e(<span class="n">$_SESSION</span>[<span class="s">'csrf'</span>]) ?&gt;"&gt;
+
+<span class="c">// before acting on any POST/PUT/PATCH/DELETE</span>
+<span class="k">if</span> (! hash_equals(<span class="n">$_SESSION</span>[<span class="s">'csrf'</span>], <span class="n">$_POST</span>[<span class="s">'_token'</span>] ?? <span class="s">''</span>)) {
+    abort(419);
+}</code></pre>
+
+<p>The attacker's page cannot read your token — the <strong>same-origin policy</strong> forbids <code>evil.example</code> from reading <code>bank.example</code>'s HTML. They can cause a request; they cannot construct a <em>valid</em> one.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Detail</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>random_bytes</code>, not <code>rand()</code></td><td>Cryptographically secure. <code>rand()</code> and <code>mt_rand()</code> are predictable from a few outputs</td></tr>
+    <tr><td><code>hash_equals</code>, not <code>===</code></td><td>Constant time. <code>===</code> returns early on the first differing byte, and that timing leaks the token</td></tr>
+    <tr><td>State-changing methods only</td><td><code>GET</code> should never change state — if it does, you have a much bigger problem</td></tr>
+    <tr><td><code>SameSite=Lax</code> as well</td><td>Defence in depth. Good, but not sufficient alone: it varies by browser and doesn't cover every case</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — why you have typed <code>@csrf</code> without knowing why</span>
+  <p>Laravel's <code>@csrf</code> emits exactly that hidden input, and <code>VerifyCsrfToken</code> middleware performs exactly that <code>hash_equals</code>. Symfony's <code>csrf_token()</code> and Django's <code>{% csrf_token %}</code> are the same thing.</p>
+  <p>The <code>419</code> status Laravel returns is not a real HTTP code — it is Laravel's own "Page Expired", chosen because the usual cause is a genuinely stale token after leaving a tab open, not an attack.</p>
+  <p><strong>APIs using bearer tokens don't need CSRF protection</strong>, because the browser doesn't attach an <code>Authorization</code> header automatically — the attack depends entirely on <em>automatic</em> credential attachment. Cookie-authenticated APIs absolutely do need it. Knowing which you are building is the whole question.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l23">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Why does a CSRF attack succeed even though the user is properly logged in over HTTPS?",
+      "options": [
+        "The browser attaches cookies by destination, not origin",
+        "The attacker managed to read the session cookie",
+        "HTTPS does not protect POST request bodies",
+        "The session had not yet been regenerated"
+      ],
+      "answer": 0,
+      "why": "Any request to bank.example carries bank.example's cookies, whoever caused it. So the forgery is fully authenticated. The attacker never reads anything — causing the action is the entire attack, which is why encryption and strong passwords are irrelevant to it."
+    },
+    {
+      "q": "Why <code>hash_equals</code> rather than <code>===</code> for token comparison?",
+      "options": [
+        "It takes constant time regardless of the input",
+        "It handles null values without raising a warning",
+        "It compares hashes rather than raw strings",
+        "It is required for binary-safe comparison"
+      ],
+      "answer": 0,
+      "why": "<code>===</code> returns as soon as bytes differ, so a token matching the first three characters takes measurably longer to reject. Repeated thousands of times, that timing reveals the token byte by byte. <code>hash_equals</code> always examines everything."
+    },
+    {
+      "q": "What does <code>session_regenerate_id(true)</code> at login prevent?",
+      "options": [
+        "Session fixation — an attacker pre-setting the id",
+        "Session hijacking via cross-site scripting",
+        "Brute-force guessing of valid session ids",
+        "Concurrent logins from two different devices"
+      ],
+      "answer": 0,
+      "why": "If an attacker can make the victim use a session id they already know, that session becomes authenticated when the victim logs in. Regenerating at the privilege boundary makes the pre-set id worthless. XSS theft is what <code>HttpOnly</code> addresses."
+    },
+    {
+      "q": "Why respond to a successful POST with a redirect rather than rendering directly?",
+      "options": [
+        "So a refresh repeats a harmless GET instead",
+        "Because POST responses cannot be cached",
+        "To allow the status code to be set correctly",
+        "So the session can be written before output"
+      ],
+      "answer": 0,
+      "why": "Post/Redirect/Get. Rendering from the POST handler means refresh re-submits — a duplicate note, or a double charge. Redirecting means the final page was reached by GET, so refreshing repeats only that. It is also why flash messages exist: the message must survive the redirect."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Trace what happens from clicking \"log in\" to loading a protected page two minutes later — naming every place data is stored. Then explain in one sentence why CSRF is possible at all.",
+  "answer": "<p><strong>Login:</strong> the browser POSTs email and password. The server looks up the user, calls <code>password_verify</code> against the stored hash, and on success calls <code>session_regenerate_id(true)</code> and writes <code>$_SESSION['user_id']</code>. PHP creates a session record <em>server-side</em> (a file in <code>/var/lib/php/sessions</code> by default, or Redis in production) keyed by a random id, and sends <code>Set-Cookie: PHPSESSID=…</code> with HttpOnly, Secure and SameSite. The response is a 303 redirect so a refresh cannot re-submit.</p><p><strong>Two minutes later:</strong> the browser automatically attaches the cookie to the GET. <code>session_start()</code> reads the id, loads the server-side record, and repopulates <code>$_SESSION</code>. The controller reads <code>$_SESSION['user_id']</code> and knows who you are. <strong>Storage: the hash in the database, the session data on the server, and only a random key in the browser.</strong></p><p><strong>Why CSRF exists:</strong> the browser attaches cookies based on where a request is going rather than what caused it, so any page anywhere can trigger a fully authenticated request to your site.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP — CSRF Prevention</a> and <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">Session Management</a>. Both are short and authoritative; the session one in particular covers cookie attributes more carefully than any tutorial.
+  <br><br>
+  Then <a href="https://www.php.net/manual/en/function.password-hash.php">PHP's <code>password_hash</code></a>, whose manual page is unusually good on why the algorithm choices are what they are.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0023" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"build login, logout and registration for the notes app with all of this done properly"</em> — it is Project 3's hardest part and worth doing together. Also good: <em>"what's the difference between session auth and JWTs, and when is each right?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0022-full-request-cycle.html">← 0022 — The Full Request Cycle</a>
+    <a href="0024-from-here-to-everything.html">0024 — From Here to Everything →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const log = document.getElementById("csrf-log");
+    const note = document.getElementById("csrf-note");
+    const tokenBox = document.getElementById("csrf-token");
+    const sameSiteBox = document.getElementById("csrf-samesite");
+
+    const lines = [];
+    const say = (text, kind = "") => {
+      lines.push(`<div class="${kind}">${text}</div>`);
+      log.innerHTML = lines.join("");
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const reset = () => {
+      lines.length = 0;
+      log.innerHTML = `<span class="dim">You are logged into bank.example. Balance: €5,000.</span>`;
+      note.innerHTML = `Open the malicious page with both defences off first, then turn each on and try again.`;
+    };
+
+    document.getElementById("csrf-go").addEventListener("click", () => {
+      lines.length = 0;
+      const token = tokenBox.checked;
+      const sameSite = sameSiteBox.checked;
+
+      say(`<span class="dim">you open evil.example in a second tab</span>`);
+      say(`<span class="dim">its script auto-submits a hidden form to bank.example</span>`);
+      say(``);
+      say(`POST /transfer HTTP/1.1`, "cmd");
+      say(`Host: bank.example`, "cmd");
+
+      if (sameSite) {
+        say(`<span class="err">(no Cookie header — SameSite=Lax withheld it on a cross-site POST)</span>`);
+      } else {
+        say(`Cookie: PHPSESSID=a3f9c1…`, "cmd");
+        say(`<span class="dim">   ↳ the browser attached this automatically. it always does.</span>`);
+      }
+      say(`to=attacker&amount=5000`, "cmd");
+      say(``);
+
+      if (sameSite) {
+        say(`✕ bank.example: no session cookie → not logged in → 401`, "ok");
+        say(`  transfer refused. balance unchanged: €5,000`, "ok");
+        note.innerHTML = `<strong style="color:var(--ok)">Blocked by SameSite.</strong> The browser refused to attach the cookie to a cross-site POST, so the request arrived unauthenticated. Good — but treat it as <em>defence in depth</em>: behaviour varies between browsers and it does not cover every navigation case. Use it <strong>with</strong> a token, never instead of one.`;
+        return;
+      }
+
+      say(`→ bank.example: session valid, user 42 is authenticated`, "");
+
+      if (token) {
+        say(`→ checking _token against $_SESSION['csrf'] …`, "");
+        say(`<span class="err">✕ no _token in the request body</span>`);
+        say(`<span class="ok">→ abort(419) — transfer refused. balance: €5,000</span>`);
+        note.innerHTML = `<strong style="color:var(--ok)">Blocked by the token.</strong> evil.example could <em>cause</em> the request but could not construct a <em>valid</em> one — the same-origin policy prevented it from reading your token out of bank.example's HTML. It could not guess it either: 32 random bytes. This is the real defence.`;
+        return;
+      }
+
+      say(`<span class="err">✕ no CSRF check performed</span>`);
+      say(`<span class="err">→ 303 redirect. €5,000 transferred to "attacker".</span>`);
+      say(``);
+      say(`<span class="dim">you saw nothing. the attacker never read the response.</span>`);
+      note.innerHTML = `<strong style="color:var(--bad)">The transfer went through.</strong> Notice what was irrelevant: HTTPS (the request was properly encrypted), your password strength, the session check (there genuinely was a valid session). The attack does not steal credentials — it <em>borrows</em> them, by making your browser do the work.`;
+    });
+
+    document.getElementById("csrf-reset").addEventListener("click", reset);
+    reset();
+  })();
+</script>

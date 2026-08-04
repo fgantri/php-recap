@@ -1,0 +1,231 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0004 — Sockets, Ports, and the Accept Loop</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0004</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Sockets, Ports, and the Accept Loop</h1>
+<p class="subtitle">"The server is running" means one process is blocked inside a function called accept(), waiting. Everything else about web servers is detail on top of that sentence.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: write the four calls that <em>are</em> a server</span></div>
+
+<p>Your course said: <em>"<code>php -S</code> starts a long-lived process that opens a socket on port 8888 and waits."</em> That is precisely correct and almost nobody who reads it could write one. Today you will — in about fifteen lines, using no framework and no library.</p>
+
+<h2>A socket is a file descriptor</h2>
+
+<p>Remember the file-descriptor table from <a href="0001-bytes-programs-processes.html">Lesson 0001</a>. A <span class="term">socket</span> is an entry in it. Not a special networking object — the same integer-indexed table that holds your open files, because Unix's design principle is that everything you can read from or write to should look the same.</p>
+
+<p>That is why you can <code>read()</code> and <code>write()</code> a network connection with the same calls you use on a file. And it is why the following works on your machine right now:</p>
+
+<pre><code><span class="c"># bash can open a TCP socket as if it were a file</span>
+exec 3&lt;&gt;/dev/tcp/example.com/80
+printf 'GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n' &gt;&amp;3
+cat &lt;&amp;3
+exec 3&lt;&amp;-</code></pre>
+
+<p>No browser, no <code>curl</code>, no library. You opened a connection on file descriptor 3, wrote nine lines of text into it, and read the reply back. <strong>That is the entire web.</strong> Everything else is convenience.</p>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Host, port, and the four-tuple</span>
+  <p>An IP address identifies a <em>machine</em>. A <span class="term">port</span> — a number 0–65535 — identifies <em>which listening program on it</em>. Your course covered both. Here is the part it left out, which resolves a question you may not have known you had.</p>
+  <p>If a hundred browsers all connect to your server on port 8888, how does the kernel keep them apart? Because a connection is identified not by one port but by a <strong>four-tuple</strong>: <code>(source IP, source port, destination IP, destination port)</code>. Your server's side is always <code>(your IP, 8888)</code>, but each client contributes a different random high-numbered source port. Every connection is therefore unique, and the kernel routes bytes to the right socket by looking up that whole tuple.</p>
+  <p>Ports below 1024 are <strong>privileged</strong> — only root may bind them. That is exactly why development servers use 8000, 8080 or 8888, and why a real deployment has nginx (started as root, then dropping privileges) holding port 80 while your application sits on a high port behind it.</p>
+</div>
+
+<h2>The four calls</h2>
+
+<p>Every TCP server ever written, in any language, is these four calls in this order:</p>
+
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Call</th><th>What it asks the kernel for</th></tr></thead>
+  <tbody>
+    <tr><td><code>socket()</code></td><td>Give me an endpoint. Returns a file descriptor.</td></tr>
+    <tr><td><code>bind()</code></td><td>Reserve this address and port for it. <em>Fails if taken →</em> <code>Address already in use</code>.</td></tr>
+    <tr><td><code>listen()</code></td><td>Start queueing incoming connections for me, up to a backlog of N.</td></tr>
+    <tr><td><code>accept()</code></td><td>Block until one is queued, then hand me a <em>new</em> fd for that one conversation.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The subtle one is <code>accept()</code>. It returns a <strong>second</strong> socket. The original listening socket never carries data — it exists only to produce connection sockets. One shop door, many conversations.</p>
+
+<h2>Play the loop</h2>
+
+<p>Boot the server by running the syscalls in order, then throw traffic at it. Watch what happens with one worker versus four, and try adding six clients at once before you have called <code>listen()</code>.</p>
+
+<div class="widget" data-serverloop>
+<script type="application/json">
+{ "workers": 1, "backlog": 6 }
+</script>
+</div>
+
+<div class="callout win">
+  <span class="label">What the simulator is showing you</span>
+  <p><strong>The backlog is the kernel's, not your program's.</strong> Connections are accepted by the operating system and queued <em>before</em> your code has any idea they exist. This is why a server that's stuck can still be connected to — the queue absorbs arrivals — and why it eventually starts refusing: the queue has a fixed size.</p>
+  <p><strong>One slow client blocks everything behind it.</strong> With one worker, a 4-tick request makes three fast requests wait 4 ticks each. That is <em>head-of-line blocking</em>, and it is the single reason web servers run pools of workers. Switch to 4 workers and rerun the same traffic to feel the difference.</p>
+</div>
+
+<h2>Write it for real</h2>
+
+<p>Create <code>server.php</code> in <code>~/websites/demo</code> and type this out. Do not paste it.</p>
+
+<div class="filename">server.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+<span class="n">$socket</span> = stream_socket_server(<span class="s">'tcp://127.0.0.1:8888'</span>, <span class="n">$errno</span>, <span class="n">$errstr</span>);
+
+<span class="k">if</span> (! <span class="n">$socket</span>) {
+    exit(<span class="s">"Cannot listen: $errstr ($errno)\n"</span>);
+}
+
+echo <span class="s">"Listening on http://127.0.0.1:8888 — Ctrl+C to stop\n"</span>;
+
+<span class="k">while</span> (<span class="k">true</span>) {
+    <span class="n">$conn</span> = stream_socket_accept(<span class="n">$socket</span>, -1);   <span class="c">// blocks here</span>
+
+    <span class="n">$request</span> = fread(<span class="n">$conn</span>, 8192);
+    <span class="n">$line</span>    = strtok(<span class="n">$request</span>, <span class="s">"\r\n"</span>);
+
+    echo <span class="s">"→ $line\n"</span>;
+
+    <span class="n">$body</span> = <span class="s">"&lt;h1&gt;Hello from a socket&lt;/h1&gt;&lt;p&gt;You asked: $line&lt;/p&gt;"</span>;
+
+    fwrite(<span class="n">$conn</span>, <span class="s">"HTTP/1.1 200 OK\r\n"</span>);
+    fwrite(<span class="n">$conn</span>, <span class="s">"Content-Type: text/html\r\n"</span>);
+    fwrite(<span class="n">$conn</span>, <span class="s">"Content-Length: "</span> . strlen(<span class="n">$body</span>) . <span class="s">"\r\n"</span>);
+    fwrite(<span class="n">$conn</span>, <span class="s">"Connection: close\r\n"</span>);
+    fwrite(<span class="n">$conn</span>, <span class="s">"\r\n"</span>);
+    fwrite(<span class="n">$conn</span>, <span class="n">$body</span>);
+
+    fclose(<span class="n">$conn</span>);
+}</code></pre>
+
+<p>Run it with <code>php server.php</code>, then open <code>http://127.0.0.1:8888</code> in your browser. <strong>You have written a web server.</strong> Not a toy version of one — that is what one is.</p>
+
+<div class="sidenote"><code>stream_socket_server</code> collapses <code>socket()</code>, <code>bind()</code> and <code>listen()</code> into one call, which is why the code is shorter than the four-call story. Use <code>strace -e trace=network php server.php</code> on Linux to watch the real syscalls underneath — <code>socket</code>, <code>bind</code>, <code>listen</code>, <code>accept4</code>, exactly in order.</div>
+
+<h3>Now break it, deliberately</h3>
+
+<ol>
+  <li>Leave it running and start a second copy in another terminal. You get <code>Address already in use</code> — <code>bind()</code> failing, exactly as the table said. <strong>One port, one listener.</strong></li>
+  <li>Comment out the <code>Content-Length</code> line and reload. Chrome will hang or truncate: without a length or chunked encoding, the browser cannot tell where your response ends.</li>
+  <li>Add <code>sleep(5);</code> before the first <code>fwrite</code>. Open two browser tabs at once. The second waits for the first — head-of-line blocking, on your own machine, with your own code.</li>
+</ol>
+
+<div class="callout foundation">
+  <span class="label">Foundation — How real servers escape the blocking problem</span>
+  <p>Your loop handles one connection at a time. The three escapes, and who uses which:</p>
+  <p><strong>Process or thread per connection.</strong> Fork a worker for each. Simple and robust — a crash takes down one worker. Memory-hungry. This is Apache's <code>prefork</code> MPM and, in essence, <strong>PHP-FPM</strong>.</p>
+  <p><strong>Event loop.</strong> One process, non-blocking sockets, and a kernel call (<code>epoll</code> on Linux) that says "tell me which of these ten thousand sockets is ready". Enormously efficient for I/O-bound work; a single slow computation stalls everything. This is <strong>nginx</strong>, <strong>Node.js</strong>, and Redis.</p>
+  <p><strong>Lightweight concurrency.</strong> The runtime multiplexes many cheap tasks onto few OS threads — goroutines in Go, async tasks in Rust. The programming model of threads with the cost profile of an event loop.</p>
+  <p>The classic production stack uses two of these at once: nginx (event loop) accepts thousands of slow client connections and speaks to PHP-FPM (process pool) over a fast local socket. Lesson 0007 is entirely about that handoff.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l4">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Your server starts and immediately exits with <code>Address already in use</code>. Which call failed?",
+      "options": [
+        "<code>bind()</code> — the port is already claimed",
+        "<code>listen()</code> — the backlog could not be set",
+        "<code>accept()</code> — no connection was pending",
+        "<code>socket()</code> — no descriptors were available"
+      ],
+      "answer": 0,
+      "why": "<code>bind()</code> is where a port is reserved, so it is where the conflict surfaces. Find the culprit with <code>ss -ltnp | grep 8888</code> (or <code>lsof -i :8888</code>) — usually a server you forgot to Ctrl+C."
+    },
+    {
+      "q": "A hundred browsers connect to your server on port 8888. How does the kernel keep the connections apart?",
+      "options": [
+        "Each connection has a unique four-tuple",
+        "Each client is given a different server port",
+        "The listening socket is duplicated per client",
+        "Connections are serialised and handled in turn"
+      ],
+      "answer": 0,
+      "why": "The tuple (source IP, source port, destination IP, destination port) is unique per connection because each client picks a different ephemeral source port. Your server's side stays 8888 throughout — which is exactly why one port can serve many clients."
+    },
+    {
+      "q": "What does <code>accept()</code> return?",
+      "options": [
+        "A new socket for one conversation",
+        "The bytes the client has sent so far",
+        "The same listening socket, now readable",
+        "The client's address and nothing else"
+      ],
+      "answer": 0,
+      "why": "A second, distinct file descriptor. The listening socket keeps listening and never carries request or response data. Missing this is why the shape of socket code looks strange the first time."
+    },
+    {
+      "q": "nginx handles 10,000 idle connections in one process. What makes that possible?",
+      "options": [
+        "An event loop over non-blocking sockets",
+        "One lightweight thread for each connection",
+        "A worker process for each connection",
+        "Connections are queued until a slot frees"
+      ],
+      "answer": 0,
+      "why": "Non-blocking sockets plus <code>epoll</code>: one process asks the kernel which descriptors are ready and services only those. Idle connections cost a few hundred bytes rather than a whole process or thread — the 'C10k problem' and its solution."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — where this shows up in the tools you named</span>
+  <p><strong>Cloudflare</strong> runs a very large event loop close to your users; a Worker is a handler invoked from it, which is why Workers must not block. <strong>Vercel</strong> and <strong>Netlify</strong> hide the accept loop entirely and hand you a function — the same shape as the body of your <code>while</code> loop. <strong>WebSockets</strong> are what happens when you simply <em>don't</em> <code>fclose()</code>: the connection stays open and both sides keep writing. <strong>HTTP/2</strong> multiplexes many logical streams over one TCP connection to dodge the head-of-line blocking you just produced with <code>sleep(5)</code>.</p>
+  <p>You now have the one mental model that makes all four legible.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Name the four syscalls that make a TCP server, in order, and say what each one asks the kernel for. Then answer: why does accept() return a different socket from the one you called it on?",
+  "answer": "<p><code>socket()</code> — give me an endpoint, as a file descriptor. <code>bind()</code> — reserve this IP and port for it. <code>listen()</code> — start queueing arrivals, up to a backlog. <code>accept()</code> — block until one is queued, then hand it to me.</p><p><strong>Why a different socket:</strong> the listening socket's job is to <em>produce</em> connections, and it must go on doing that for the next client. If it became the conversation, the server could only ever serve one client and would then be finished. So <code>accept()</code> returns a fresh descriptor bound to that one four-tuple, and the listening socket stays untouched, ready to be accepted from again.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://beej.us/guide/bgnet/html/#client-server-background">Beej's Guide to Network Programming — Client-Server Background</a>. Thirty years old, still the best explanation of sockets in existence, and it walks the exact four calls above in C. Read that one section; you do not need the whole guide.
+  <br><br>
+  Then <a href="https://www.php.net/manual/en/function.stream-socket-server.php">PHP's <code>stream_socket_server</code></a> for the wrapper you actually used.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0004" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> High-value follow-ups: <em>"run strace on my server.php and explain each syscall"</em>, <em>"show me the fork-per-connection version"</em> (it's about six extra lines and makes the worker-pool idea concrete), or <em>"what is TIME_WAIT and why does my port stay busy after I kill the server?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0003-the-shell.html">← 0003 — The Shell, Properly</a>
+    <a href="0005-http-is-text.html">0005 — HTTP Is Just Text →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script src="../assets/serverloop.js"></script>

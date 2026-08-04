@@ -1,0 +1,240 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0024 — From Here to Everything</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0024</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>From Here to Everything</h1>
+<p class="subtitle">The payoff. Every piece you built by hand this weekend, named in the vocabulary of the stacks you actually wanted to understand.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: the whole ecosystem, mapped to your own code</span></div>
+
+<p>Your stated goal was never to write PHP from memory. It was to make Laravel, Next, WordPress, Shopware, Vite and Cloudflare <em>legible</em> — arrangements of known parts rather than magic. This lesson closes that loop.</p>
+
+<h2>What you built, and what it is called</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>You wrote</th><th>The concept</th><th>Laravel</th><th>Symfony / Shopware</th></tr></thead>
+  <tbody>
+    <tr><td><code>public/index.php</code>, sole entry</td><td>Front controller</td><td><code>public/index.php</code></td><td><code>public/index.php</code></td></tr>
+    <tr><td><code>Router</code> with <code>{id}</code></td><td>Route table + dispatcher</td><td><code>routes/web.php</code>, <code>Illuminate\Routing</code></td><td><code>#[Route]</code> attributes, <code>HttpKernel</code></td></tr>
+    <tr><td><code>Request</code> class, readonly</td><td>Request object</td><td><code>Illuminate\Http\Request</code></td><td><code>HttpFoundation\Request</code></td></tr>
+    <tr><td><code>controllers/*.php</code></td><td>Controllers</td><td><code>app/Http/Controllers</code></td><td><code>src/Controller</code></td></tr>
+    <tr><td><code>view()</code> + <code>ob_start</code></td><td>Template engine</td><td>Blade</td><td>Twig</td></tr>
+    <tr><td><code>layout.view.php</code></td><td>Layout inheritance</td><td><code>@extends</code></td><td><code>{% extends %}</code></td></tr>
+    <tr><td><code>e()</code> everywhere</td><td>Output escaping</td><td><code>{{ }}</code> — automatic</td><td><code>{{ }}</code> — automatic</td></tr>
+    <tr><td><code>Database</code> + PDO</td><td>Connection wrapper</td><td><code>Illuminate\Database</code></td><td>Doctrine DBAL</td></tr>
+    <tr><td><code>config.php</code> returning an array</td><td>Configuration</td><td><code>config/*.php</code></td><td><code>config/packages/*.yaml</code></td></tr>
+    <tr><td><code>abort(404)</code></td><td>Error handling</td><td><code>abort(404)</code> — same name</td><td><code>NotFoundHttpException</code></td></tr>
+    <tr><td><code>Response::FORBIDDEN</code></td><td>Status constants</td><td><code>Response::HTTP_FORBIDDEN</code></td><td><code>Response::HTTP_FORBIDDEN</code></td></tr>
+    <tr><td>Ownership check before render</td><td>Authorization</td><td>Policies, gates</td><td>Voters, <code>#[IsGranted]</code></td></tr>
+    <tr><td>CSRF token + <code>hash_equals</code></td><td>CSRF protection</td><td><code>@csrf</code>, middleware</td><td><code>csrf_token()</code></td></tr>
+    <tr><td><code>$_SESSION</code> + regenerate</td><td>Session handling</td><td><code>Session</code> facade</td><td><code>SessionInterface</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Nothing in the left column is a toy version of the right column.</strong> It is the same idea with fewer features.</p>
+
+<h2>What frameworks add on top</h2>
+
+<div class="grid two">
+  <div class="card"><h4>Middleware pipeline</h4><p>Layers each request passes through and each response passes back through — auth, CSRF, rate limiting, compression. Structurally the callback chain from Lesson 0012.</p></div>
+  <div class="card"><h4>DI container</h4><p>Controllers declare what they need; the container constructs and supplies it. Replaces your <code>$db</code>-through-shared-scope, and is what makes code testable.</p></div>
+  <div class="card"><h4>ORM</h4><p><code>Note::where('user_id', $id)->get()</code> instead of SQL, returning objects. Eloquent is <em>Active Record</em> (the model persists itself); Doctrine is <em>Data Mapper</em> (a separate layer moves data). Genuinely different philosophies.</p></div>
+  <div class="card"><h4>Migrations</h4><p>Schema changes as versioned, executable code, so every environment's database rebuilds from source instead of being hand-edited in a GUI.</p></div>
+  <div class="card"><h4>Validation</h4><p>Declarative rules with structured errors, returning <code>422</code>. You wrote the status code; they wrote the rule engine.</p></div>
+  <div class="card"><h4>Composer + PSR-4</h4><p>No more <code>require</code> for classes. Namespaces map to directories and classes load on first use — the reason <code>Database.php</code> must be named after its class.</p></div>
+</div>
+
+<p>Every one of those solves a problem you can now <em>name</em>, because you either hit it or were shown where it lies.</p>
+
+<h2>Where does it live? — the placement drill</h2>
+
+<p>The real test of this weekend isn't recall. It's being handed an unfamiliar concern and knowing which layer owns it.</p>
+
+<div class="widget" data-quiz data-seed="l24place">
+<script type="application/json">
+{
+  "title": "Which layer owns this?",
+  "questions": [
+    {
+      "q": "Redirecting all HTTP traffic to HTTPS.",
+      "options": [
+        "The web server, before your code runs",
+        "The front controller, on every request",
+        "A middleware in the framework pipeline",
+        "The router, as a rule on each route"
+      ],
+      "answer": 0,
+      "why": "nginx or your CDN handles this — no reason to boot PHP to issue a redirect. General rule: the further out you can push a concern, the cheaper it is. This is also why static assets should never reach PHP."
+    },
+    {
+      "q": "Ensuring no two users share an email address.",
+      "options": [
+        "A unique index in the database",
+        "A validation rule in the controller",
+        "A check in the registration form",
+        "A constraint in the User model class"
+      ],
+      "answer": 0,
+      "why": "Only the database can make the check and the write atomic — application checks lose to the check-then-act race. Keep the validation rule too, for a friendly message. Validate for UX, constrain for truth."
+    },
+    {
+      "q": "Deciding whether this user may view this note.",
+      "options": [
+        "A policy or voter, called by the controller",
+        "The router, when matching the route",
+        "The view, before rendering the body",
+        "The database, via a row-level filter"
+      ],
+      "answer": 0,
+      "why": "Authorization is a decision, and decisions belong to the controller layer — delegated to a policy so it can be tested once and applied everywhere. A view making decisions stops being dumb, and a router doesn't know about records yet."
+    },
+    {
+      "q": "Escaping a note body so a <code>&lt;script&gt;</code> tag cannot run.",
+      "options": [
+        "The template, at the moment of output",
+        "The controller, before passing data on",
+        "The model, when loading from storage",
+        "The database, on insert via a trigger"
+      ],
+      "answer": 0,
+      "why": "<strong>Escape on output, never on input.</strong> The correct escaping depends on the destination context — HTML body, attribute, URL, JavaScript — and only the template knows which. Escaping on input also corrupts the stored data and breaks the moment you add a second output format."
+    },
+    {
+      "q": "Caching an expensive report for five minutes.",
+      "options": [
+        "Depends where the response varies — from CDN to query",
+        "Always Redis, keyed by the report parameters",
+        "Always an HTTP Cache-Control header",
+        "Always a materialised view in the database"
+      ],
+      "answer": 0,
+      "why": "The real answer. Identical for everyone → cache at the CDN and never reach your server. Per-user → application cache such as Redis. Expensive aggregate reused across requests → a materialised view or summary table. \"Where does this response vary?\" determines the layer, and Lesson 0006's waterfall says why pushing it outward wins."
+    }
+  ]
+}
+</script>
+</div>
+
+<h2>The JavaScript world, in your vocabulary</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Your weekend</th><th>The JS equivalent</th><th>The difference that matters</th></tr></thead>
+  <tbody>
+    <tr><td><code>server.php</code> accept loop</td><td>Node's <code>http.createServer</code></td><td>Node uses one event loop; PHP-FPM uses a process pool</td></tr>
+    <tr><td>Front controller + router</td><td>Express <code>app.get()</code>; Next's file-system routes</td><td>Next's <code>[id]</code> is your <code>{id}</code> with different punctuation</td></tr>
+    <tr><td><code>view()</code> returning a string</td><td>React components returning JSX</td><td>React re-renders on state change; your view renders once and is gone</td></tr>
+    <tr><td><code>e()</code> on output</td><td>JSX escaping by default</td><td>Same principle. Opt out via <code>dangerouslySetInnerHTML</code> — named to make you hesitate</td></tr>
+    <tr><td>No build step</td><td>Vite / webpack / Turbopack</td><td>Browsers can't run TS or JSX; a build must produce something they can</td></tr>
+    <tr><td>Shared-nothing per request</td><td>Vercel / Cloudflare functions</td><td>Serverless rediscovered PHP's model and sold it back as a billing unit</td></tr>
+    <tr><td><code>$_SESSION</code> server-side</td><td>Cookies, JWTs, edge KV</td><td>Edge functions have no local disk, so session state must be external</td></tr>
+    <tr><td><code>config.php</code> from env</td><td><code>process.env</code>, Vercel env vars</td><td>Identical idea. Both are <a href="https://12factor.net/config">Twelve-Factor</a> factor III</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Rendering strategies, decided by one question</h3>
+
+<p><strong>When is the HTML built?</strong> That is the whole argument.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Strategy</th><th>HTML built</th><th>Good</th><th>Bad</th><th>Who</th></tr></thead>
+  <tbody>
+    <tr><td><strong>SSR</strong></td><td>Per request, on the server</td><td>Fast first paint, always fresh, SEO-friendly</td><td>Server works every time</td><td>PHP since 1995; Laravel, WordPress, Next server mode</td></tr>
+    <tr><td><strong>SSG</strong></td><td>At build time</td><td>Nearly free to serve; CDN-cacheable</td><td>Rebuild to change anything</td><td>Astro, Hugo, Next static</td></tr>
+    <tr><td><strong>CSR</strong></td><td>In the browser</td><td>Rich interactivity, cheap hosting</td><td>Slow first paint, JS required</td><td>Vite + React/Vue SPA</td></tr>
+    <tr><td><strong>ISR</strong></td><td>Build time, regenerated in background</td><td>Static speed, near-fresh data</td><td>Windows of staleness; complex to reason about</td><td>Next on Vercel</td></tr>
+    <tr><td><strong>Islands</strong></td><td>Server, plus small hydrated regions</td><td>Minimal JS shipped</td><td>Constrained interactivity model</td><td>Astro, Fresh</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout win">
+  <span class="label">The thing almost nobody says out loud</span>
+  <p>An enormous amount of front-end evolution since 2015 has been <strong>rediscovering server rendering</strong>. SPAs moved rendering to the browser; first paint got slow and SEO broke; SSR was reintroduced; then hydration was found expensive; now the industry is shipping less JavaScript and rendering more on the server.</p>
+  <p>React Server Components — the current frontier — are, structurally, <em>components that run on the server and send HTML</em>. Which is what a PHP view has always been, with a better programming model on top.</p>
+  <p>This is not a reason to be smug. It is a reason to be <strong>calm</strong>: you now understand the axis these tools move along, so a new framework is a new position on a familiar line rather than something to learn from zero. That is exactly the fluency you said you wanted.</p>
+</div>
+
+<h2>WordPress and Shopware, specifically</h2>
+
+<div class="grid two">
+  <div class="card">
+    <h4>WordPress — predates the conventions</h4>
+    <p><strong>Not MVC.</strong> Its cycle goes through a query parser and a <strong>template hierarchy</strong> — fixed rules deciding which template file renders a URL (<code>single-post.php</code> → <code>single.php</code> → <code>index.php</code>).</p>
+    <p><strong>Hooks</strong> are its extensibility model: <code>add_action</code> and <code>add_filter</code> register callbacks against named events. That is Lesson 0012's higher-order functions, at the scale of a whole application.</p>
+    <p><strong><code>$wpdb</code></strong> is a global connection wrapper over direct SQL, with <code>$wpdb->prepare()</code> playing exactly the role Lesson 0020 described.</p>
+    <p>If WordPress has felt arbitrary, that is because its conventions <em>predate</em> the ones this weekend taught. Knowing both makes the differences legible instead of confusing.</p>
+  </div>
+  <div class="card">
+    <h4>Shopware 6 — Symfony underneath</h4>
+    <p>Built <em>on</em> Symfony, so the entire Symfony column of the first table applies directly: its controllers are Symfony controllers, its templates are Twig, its DI is Symfony's container, its request cycle is HttpKernel.</p>
+    <p>On top sits its own domain layer — the <strong>DAL</strong> (Data Abstraction Layer), entity definitions, and an event system.</p>
+    <p><strong>The practical route in: learn Symfony fundamentals.</strong> Read the HttpKernel component you were pointed at in Lesson 0014, and Shopware stops being a separate subject.</p>
+    <p>Shopify is a different animal entirely — a hosted platform with Liquid templating and no server of your own. The concepts transfer; the control does not.</p>
+  </div>
+</div>
+
+<h2>Cloudflare, Vercel, and the edge</h2>
+
+<p>You have everything needed to read these correctly now:</p>
+
+<ul>
+  <li><strong>A CDN</strong> caches responses near users. From <a href="0006-url-to-pixels.html">Lesson 0006</a>: it removes <em>round trips</em>, which no code optimisation can match.</li>
+  <li><strong>An edge function</strong> is a request→response handler with no machine of its own. It is the body of your <code>while</code> loop from Lesson 0004, running in someone else's event loop — which is why blocking is forbidden there.</li>
+  <li><strong>Edge KV / D1</strong> exist because shared-nothing at the edge means <em>truly</em> nothing — no local disk, no local database. State must be explicitly external.</li>
+  <li><strong>Vercel's build output</strong> is a manifest describing, per route, whether it is static or dynamic. That is <code>try_files</code> from <a href="0007-server-vs-runtime.html">Lesson 0007</a>, expressed as configuration.</li>
+</ul>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "The final retrieval — this is the weekend's exam",
+  "prompt": "Without notes: trace a request for <code>/notes/17</code> from the moment a key is pressed to the moment pixels appear, naming every program, protocol, file and decision involved. Aim for two minutes of unbroken explanation.",
+  "answer": "<p><strong>Client:</strong> parse the URL into scheme, host, port, path, query, fragment — the fragment never leaves the browser. Resolve DNS, checking browser, OS and recursive-resolver caches before root → TLD → authoritative. TCP three-way handshake to the IP on 443. TLS handshake — certificate validated, keys agreed, protocol negotiated via ALPN. Send the request: request line, <code>Host</code>, headers, blank line.</p><p><strong>Server:</strong> nginx accepts the connection (its event loop is blocked in <code>accept()</code> until this arrives) and terminates TLS. <code>try_files</code> asks: file at that path? no. Directory? no. Fall through to <code>/index.php</code>. That matches the PHP location block, so nginx opens a socket to PHP-FPM and speaks FastCGI, packing the request into CGI-style variables — <code>REQUEST_URI</code>, <code>REQUEST_METHOD</code> — the same names since 1993.</p><p><strong>PHP:</strong> the FPM master hands the request to an idle worker. RINIT populates the superglobals. <code>index.php</code> is compiled to opcodes — or fetched from OPcache — and executed. Bootstrap: helpers, config, then a <code>Database</code> whose constructor opens a PDO connection with exceptions on, associative fetch, and emulation off. Routes register. The router strips the query with <code>parse_url</code>, matches <code>/notes/{id}</code> against an anchored regex, captures <code>id = 17</code>. The controller prepares a parameterised query — so <code>17</code> can never become SQL — and MySQL plans it, using the B-tree index on the primary key to seek rather than scan. <code>fetch()</code> returns a row or <code>false</code>; false means <code>abort(404)</code>. Ownership is checked against the session user; a mismatch means <code>abort(403)</code> — or 404, if existence is sensitive. The view renders through output buffering into a layout, escaping every user-derived value.</p><p><strong>Back:</strong> output travels over FastCGI to nginx, which adds headers and writes to the socket. RSHUTDOWN destroys every variable, object and connection — shared-nothing — and the worker waits for the next request. The browser parses HTML into the DOM and CSS into the CSSOM, builds a render tree, lays out, paints and composites. Pixels.</p><p><strong>If you got most of that: you are done.</strong> That is the sentence your course opened with, fully expanded — and it is more than most working developers can give.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Where to go next, in order</span>
+  <p style="margin:0.4rem 0"><strong>1.</strong> <a href="https://laravel.com/docs/lifecycle">Laravel — Request Lifecycle</a> and <a href="https://laravel.com/docs/container">Service Container</a>. Read them <em>now</em>, while your hand-built version is fresh. They describe exactly what you built.</p>
+  <p style="margin:0.4rem 0"><strong>2.</strong> <a href="https://symfony.com/doc/current/components/http_kernel.html">Symfony HttpKernel</a>. Small, well documented, and the engine under most of the PHP world — including Shopware.</p>
+  <p style="margin:0.4rem 0"><strong>3.</strong> <a href="https://www.php-fig.org/psr/psr-7/">PSR-7</a> then <a href="https://www.php-fig.org/psr/psr-15/">PSR-15</a>. Your <code>Request</code> class and your middleware idea, standardised.</p>
+  <p style="margin:0.4rem 0"><strong>4.</strong> <a href="https://vite.dev/guide/why">Why Vite</a> and <a href="https://nextjs.org/docs/app/getting-started/server-and-client-components">Next's Server Components</a>. Read both as answers to "when is the HTML built?" rather than as tutorials.</p>
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0024" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> The best question now is the one you have been carrying all weekend. Some good ones: <em>"build the same notes app in Laravel so I can diff it against mine"</em>, <em>"what would you interview me on to check this actually stuck?"</em>, or <em>"which of these should I learn first given my course resumes tomorrow?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0023-state-sessions-csrf.html">← 0023 — State: Cookies, Sessions, POST, CSRF</a>
+    <a href="../projects/03-notes-app.html">Project 3 — The notes app, complete →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

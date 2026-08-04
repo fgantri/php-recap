@@ -1,0 +1,305 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0009 — Variables, Types, Memory</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0009</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Variables, Types, Memory</h1>
+<p class="subtitle">Your course said a variable is "a name bound to a value in memory". True — and the binding is cleverer than that, in a way that decides whether passing an array to a function costs nothing or costs everything.</p>
+
+<div class="meta"><span>40 minutes</span><span>Win: why copying a big array is free</span></div>
+
+<p>Here is a question that separates people who use PHP from people who understand it. You have an array of 100,000 rows from a database. You write <code>$copy = $rows;</code>. How much memory did that use?</p>
+
+<p>The answer is <strong>almost none</strong> — until you touch <code>$copy</code>. Today is about why.</p>
+
+<h2>The symbol table and the zval</h2>
+
+<p>A PHP variable is two things: an entry in the <span class="term">symbol table</span> (a hash map from name to a slot) and a <span class="term">zval</span> — a small container holding a <em>type tag</em> and a <em>value</em>.</p>
+
+<p>Simple values — integers, floats, booleans, null — live directly inside the zval. Larger values — strings, arrays, objects — live elsewhere, and the zval holds a pointer to them plus a <strong>reference count</strong>.</p>
+
+<div class="widget" id="mem">
+  <div class="widget-title">Copy-on-write, step by step</div>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:1rem" class="controls" id="mem-buttons"></div>
+  <div style="display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr))">
+    <div>
+      <h4 style="margin-top:0">Symbol table</h4>
+      <div id="mem-symbols"></div>
+    </div>
+    <div>
+      <h4 style="margin-top:0">Heap</h4>
+      <div id="mem-heap"></div>
+    </div>
+  </div>
+  <pre style="margin:0.9rem 0 0;font-size:0.76rem"><code id="mem-code"></code></pre>
+  <p id="mem-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.8rem 0 0"></p>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Copy-on-write, and the one rule that follows</span>
+  <p>Assignment does not copy the data. It copies the <em>pointer</em> and increments the refcount. Both names now point at one array.</p>
+  <p>The copy happens only when one of them is <strong>modified</strong> — at that moment PHP sees refcount &gt; 1, duplicates the data, and lets the writer change its own copy. This is <span class="term">copy-on-write</span>, and it is why PHP can pass big arrays around freely.</p>
+  <p><strong>The rule it gives you:</strong> reading is free, writing is not. A function that receives a large array and only reads it costs nothing. The same function with one innocuous <code>$rows[] = $x;</code> in it silently duplicates the entire structure. When a script's memory usage doubles for no visible reason, this is nearly always why.</p>
+</div>
+
+<h2>Objects break the pattern — deliberately</h2>
+
+<p>This is the exception that causes real bugs, so it's worth stating precisely.</p>
+
+<pre><code><span class="n">$a</span> = [<span class="s">'x'</span> =&gt; 1];
+<span class="n">$b</span> = <span class="n">$a</span>;
+<span class="n">$b</span>[<span class="s">'x'</span>] = 99;
+echo <span class="n">$a</span>[<span class="s">'x'</span>];        <span class="c">// 1  — arrays copy on write</span>
+
+<span class="n">$a</span> = <span class="k">new</span> stdClass;
+<span class="n">$a</span>-&gt;x = 1;
+<span class="n">$b</span> = <span class="n">$a</span>;
+<span class="n">$b</span>-&gt;x = 99;
+echo <span class="n">$a</span>-&gt;x;             <span class="c">// 99 — objects are handles</span></code></pre>
+
+<p>An object variable holds a <strong>handle</strong> — an identifier for an object in the object store. Copying the variable copies the handle, and both handles refer to the same object. There is no copy-on-write, because nothing was ever conceptually copied.</p>
+
+<div class="callout warn">
+  <span class="label">Say it precisely, because the folklore is wrong</span>
+  <p>People say "objects are passed by reference in PHP". They are not, and the difference is testable:</p>
+  <pre style="margin:0.6rem 0"><code>function reassign($o) { $o = new stdClass; $o->x = 'new'; }
+function mutate($o)   { $o->x = 'changed'; }
+
+$obj = new stdClass; $obj->x = 'original';
+
+reassign($obj); echo $obj->x;   // original — the handle was copied
+mutate($obj);   echo $obj->x;   // changed  — same object behind both handles</code></pre>
+  <p>The handle is passed <em>by value</em>. You can mutate what it points at; you cannot make the caller's variable point somewhere else. That is exactly Java's and JavaScript's model too, and getting the wording right here is a small mark of someone who actually knows the runtime.</p>
+</div>
+
+<h2>Dynamic typing, and the modern escape from it</h2>
+
+<p>Your course flagged the hazard: a variable has no declared type, so a value of the wrong type travels silently until something downstream misbehaves — and Chapter 14's <code>fetch()</code> returning <code>false</code> instead of an array is exactly that failure.</p>
+
+<p>Modern PHP lets you close the gap. Put this at the top of every PHP file you write from now on:</p>
+
+<pre><code><span class="k">&lt;?php</span>
+
+declare(strict_types=1);</code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Call</th><th>Default (coercive)</th><th><code>strict_types=1</code></th></tr></thead>
+  <tbody>
+    <tr><td><code>f('5')</code> where <code>f(int $n)</code></td><td>silently becomes <code>5</code></td><td><code>TypeError</code> immediately</td></tr>
+    <tr><td><code>f('abc')</code> where <code>f(int $n)</code></td><td><code>TypeError</code></td><td><code>TypeError</code></td></tr>
+    <tr><td><code>f(1.5)</code> where <code>f(int $n)</code></td><td><code>1</code>, with a deprecation</td><td><code>TypeError</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>It is per-file and affects only calls made <em>from</em> that file, so you can adopt it incrementally. The payoff is that failures surface at the boundary they crossed rather than five stack frames later — which is the single most valuable property an error can have.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — this is the same argument as TypeScript</span>
+  <p>PHP's type declarations are enforced <em>at runtime</em>: the check happens when the call is made. TypeScript's are enforced <em>at compile time</em> and erased entirely — at runtime, a TypeScript function will happily receive a string where a number was declared, because the compiler is gone.</p>
+  <p>Two genuinely different bets. PHP catches everything but only when the line executes. TypeScript catches at build time but only what it can prove, and lies to you the moment data arrives from an API. Tools like Zod exist precisely to add PHP-style runtime checking back to TypeScript at the boundaries — which tells you something about which problem is harder.</p>
+</div>
+
+<h2>Strings, and one number worth knowing</h2>
+
+<div class="callout warn">
+  <span class="label">Install checkpoint 2 — three packages</span>
+  <p>Run <code>php -m | grep -i mbstring</code>. Nothing? Correct — you installed only <code>php-cli</code> in <a href="0000-what-am-i-installing.html">Lesson 0000</a>. Time for rung 2:</p>
+  <pre style="margin:0.6rem 0"><code>sudo apt install -y php-mbstring php-curl php-sqlite3</code></pre>
+  <p><strong><code>php-mbstring</code></strong> — the multi-byte string functions used immediately below. Without it, <code>mb_strlen()</code> is undefined and any attempt to cut a string safely will split characters in half.<br>
+  <strong><code>php-curl</code></strong> — outbound HTTP, so your server can be a <em>client</em>. Needed from Project 3 onward.<br>
+  <strong><code>php-sqlite3</code></strong> — a database with no server, no port and no password. Lesson 0016 explains why you may not need MySQL at all.</p>
+  <p>Confirm with <code>php -m | grep -E 'mbstring|curl|sqlite'</code> — three lines where there were none. You just watched a capability appear, which is exactly what a bundle hides from you.</p>
+</div>
+
+<p>PHP strings are byte arrays with a length, not null-terminated. <code>strlen()</code> counts <strong>bytes</strong>; <code>mb_strlen()</code> counts characters.</p>
+
+<pre><code>strlen(<span class="s">'café'</span>);      <span class="c">// 5 — é is two bytes in UTF-8</span>
+mb_strlen(<span class="s">'café'</span>);   <span class="c">// 4</span></code></pre>
+
+<p>This matters more than it looks. <code>Content-Length</code> in Project 1 must be <code>strlen</code> — HTTP counts bytes. A <code>VARCHAR(255)</code> column and a <code>substr()</code> truncation disagree about "255" unless you are careful. And splitting a multi-byte character in half produces the mojibake you have seen on badly built sites.</p>
+
+<div class="widget" data-quiz data-seed="l9">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "You pass a 200 MB array into a function that only reads it. Roughly how much extra memory is used?",
+      "options": [
+        "Almost none — the refcount was incremented",
+        "About 200 MB — arguments are copied on call",
+        "About 400 MB — both a copy and a reference",
+        "It depends on whether the array is associative"
+      ],
+      "answer": 0,
+      "why": "Copy-on-write. The data is shared until somebody writes. Add a single mutation inside that function and the 200 MB duplication appears — which is why an innocuous-looking edit can double a script's memory."
+    },
+    {
+      "q": "<code>function f($o) { $o = new stdClass; }</code> is called with an object. What happens to the caller's variable?",
+      "options": [
+        "Nothing — the handle was passed by value",
+        "It points at the new object created inside",
+        "It becomes null once the function returns",
+        "A TypeError, since objects need <code>&amp;</code>"
+      ],
+      "answer": 0,
+      "why": "The handle is copied on the way in. Reassigning the parameter repoints only the local copy. Mutating <code>$o->x</code> would have been visible to the caller, because that changes the shared object rather than the handle."
+    },
+    {
+      "q": "With <code>declare(strict_types=1)</code>, what does <code>f('5')</code> do where <code>f(int $n)</code>?",
+      "options": [
+        "Throws a TypeError at the call site",
+        "Coerces the string to integer 5",
+        "Emits a deprecation and proceeds",
+        "Passes the string through unchanged"
+      ],
+      "answer": 0,
+      "why": "Strict mode refuses the coercion entirely. That is the point: the failure appears exactly where the wrong type crossed the boundary, not several frames later where the symptom appears."
+    },
+    {
+      "q": "<code>strlen('café')</code> returns 5. Why?",
+      "options": [
+        "It counts bytes, and é needs two of them",
+        "It counts the terminating null byte as well",
+        "It counts combining accents as separate glyphs",
+        "It returns the allocated capacity, not the length"
+      ],
+      "answer": 0,
+      "why": "PHP strings are byte arrays. In UTF-8, <code>é</code> is two bytes (0xC3 0xA9). Use <code>mb_strlen</code> for characters — and keep using <code>strlen</code> for <code>Content-Length</code>, because HTTP genuinely counts bytes."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Explain copy-on-write to someone who has just learned that PHP \"copies arrays on assignment\". Then explain why objects behave differently, using the word <em>handle</em> and avoiding the phrase \"by reference\".",
+  "answer": "<p><strong>Copy-on-write:</strong> assignment copies a pointer and bumps a reference count, not the data. Both names refer to one array. When either is written to, PHP notices the refcount is above one, duplicates the array at that moment, and applies the write to the new copy. So the observable behaviour is value semantics — neither name can see the other's changes — while the cost is deferred until a write actually happens, and avoided entirely if none does.</p><p><strong>Objects:</strong> an object variable holds a <em>handle</em> — an identifier into the object store. Assignment copies the handle, and both handles designate the same object, so there is nothing to copy and no copy-on-write to trigger. Mutating through either handle is visible through the other. But because the handle itself is passed by value, reassigning a parameter inside a function repoints only that local handle and the caller is unaffected.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.phpinternalsbook.com/php7/zvals/basic_structure.html">PHP Internals Book — Basic zval structure</a> for what a variable really is, and <a href="https://www.php.net/manual/en/language.types.declarations.php">the PHP manual on type declarations</a> for the strict-types table above.
+  <br><br>
+  For the byte-versus-character problem, Joel Spolsky's <a href="https://www.joelonsoftware.com/2003/10/08/the-absolute-minimum-every-software-developer-absolutely-positively-must-know-about-unicode-and-character-sets-no-excuses/">Absolute Minimum Every Developer Must Know About Unicode</a> remains the clearest twenty minutes you can spend on it.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0009" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Good ones: <em>"show me memory_get_usage() proving copy-on-write with a big array"</em> — it's a five-line script and genuinely satisfying — or <em>"when should I actually use &amp;$reference parameters?"</em> (short answer: almost never, and here's the exception).
+  </div>
+
+  <div class="nextprev">
+    <a href="0008-how-php-runs.html">← 0008 — How PHP Actually Runs a File</a>
+    <a href="0010-truth-and-coercion.html">0010 — Truth, Comparison, Coercion →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const STEPS = [
+      {
+        code: "$a = ['x' => 1, 'y' => 2];",
+        symbols: [["$a", "array →", "#1"]],
+        heap: [["#1", "['x'=>1,'y'=>2]", 1]],
+        note: "One array on the heap, one name pointing at it, refcount 1.",
+      },
+      {
+        code: "$a = ['x' => 1, 'y' => 2];\n$b = $a;",
+        symbols: [["$a", "array →", "#1"], ["$b", "array →", "#1"]],
+        heap: [["#1", "['x'=>1,'y'=>2]", 2]],
+        note: "<strong>No copy happened.</strong> The pointer was duplicated and the refcount went to 2. This is why the assignment is O(1) no matter how large the array is.",
+      },
+      {
+        code: "$a = ['x' => 1, 'y' => 2];\n$b = $a;\necho $b['x'];",
+        symbols: [["$a", "array →", "#1"], ["$b", "array →", "#1"]],
+        heap: [["#1", "['x'=>1,'y'=>2]", 2]],
+        note: "Reading through <code>$b</code> changes nothing. <strong>Reads never trigger a copy</strong> — a function that only reads a huge array is free.",
+      },
+      {
+        code: "$a = ['x' => 1, 'y' => 2];\n$b = $a;\necho $b['x'];\n$b['x'] = 99;",
+        symbols: [["$a", "array →", "#1"], ["$b", "array →", "#2"]],
+        heap: [["#1", "['x'=>1,'y'=>2]", 1], ["#2", "['x'=>99,'y'=>2]", 1]],
+        note: "<strong>The write triggered the separation.</strong> PHP saw refcount 2, duplicated the array, pointed <code>$b</code> at the new one, and applied the change there. Both refcounts drop to 1. <code>$a['x']</code> is still 1.",
+      },
+      {
+        code: "$a = ['x' => 1, 'y' => 2];\n$b = $a;\necho $b['x'];\n$b['x'] = 99;\nunset($b);",
+        symbols: [["$a", "array →", "#1"]],
+        heap: [["#1", "['x'=>1,'y'=>2]", 1]],
+        note: "<code>unset</code> removes the symbol and decrements the refcount. Reaching zero frees the memory immediately — PHP's primary memory management is reference counting, not a garbage collector. (A cycle collector exists for the case refcounting cannot handle: objects that point at each other.)",
+      },
+      {
+        code: "$o = new stdClass;\n$o->x = 1;\n$p = $o;\n$p->x = 99;\necho $o->x;   // 99",
+        symbols: [["$o", "object →", "#7"], ["$p", "object →", "#7"]],
+        heap: [["#7", "stdClass { x: 99 }", 2]],
+        note: "<strong>Objects have no copy-on-write.</strong> Both names hold a handle to one object, and the write went straight through. To get a copy you must ask: <code>$p = clone $o;</code> — and even then, nested objects are shared unless you write <code>__clone()</code> (a \"shallow\" copy).",
+      },
+    ];
+
+    const buttons = document.getElementById("mem-buttons");
+    const symbolBox = document.getElementById("mem-symbols");
+    const heapBox = document.getElementById("mem-heap");
+    const codeBox = document.getElementById("mem-code");
+    const note = document.getElementById("mem-note");
+
+    const paint = (index) => {
+      const step = STEPS[index];
+
+      symbolBox.innerHTML = step.symbols.map(([name, type, target]) =>
+        `<div style="display:flex;gap:0.4rem;align-items:center;font-family:var(--mono);font-size:0.78rem;
+          border:1px solid var(--rule);border-radius:2px;padding:0.3rem 0.5rem;margin:0.2rem 0;background:var(--paper)">
+          <strong style="color:var(--accent)">${name}</strong>
+          <span style="color:var(--ink-faint)">${type}</span>
+          <span style="color:var(--link)">${target}</span>
+        </div>`).join("");
+
+      heapBox.innerHTML = step.heap.map(([id, value, rc]) =>
+        `<div style="border:1px solid ${rc > 1 ? "var(--accent)" : "var(--rule)"};border-radius:2px;
+          padding:0.3rem 0.5rem;margin:0.2rem 0;background:var(--paper)">
+          <div style="font-family:var(--mono);font-size:0.76rem"><span style="color:var(--link)">${id}</span> ${value}</div>
+          <div style="font-family:var(--sans);font-size:0.68rem;color:${rc > 1 ? "var(--accent)" : "var(--ink-faint)"};margin-top:0.1rem">
+            refcount ${rc}${rc > 1 ? " — shared, a write will separate them" : ""}</div>
+        </div>`).join("");
+
+      codeBox.textContent = step.code;
+      note.innerHTML = step.note;
+      [...buttons.children].forEach((b, i) => b.classList.toggle("primary", i === index));
+    };
+
+    STEPS.forEach((_, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = index === STEPS.length - 1 ? "objects" : `step ${index + 1}`;
+      button.addEventListener("click", () => paint(index));
+      buttons.append(button);
+    });
+
+    paint(0);
+  })();
+</script>

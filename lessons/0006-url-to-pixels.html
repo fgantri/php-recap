@@ -1,0 +1,295 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0006 — From URL to Pixels</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0006</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/http-cheatsheet.html">HTTP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>From URL to Pixels</h1>
+<p class="subtitle">The interview question that is actually a map of the entire industry. Every job title in web development lives at one of these nine hops.</p>
+
+<div class="meta"><span>45 minutes</span><span>Win: name all nine hops, in order</span></div>
+
+<p>You have now built two of these hops yourself. This lesson assembles the whole chain, and — more usefully — attaches a <em>time cost</em> to each one, because that is what turns the list into engineering judgement.</p>
+
+<h2>The nine hops</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:1.6rem"></th><th>Hop</th><th>What happens</th><th>Who owns it</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Parse the URL</td><td>Split scheme, host, port, path, query, fragment. The fragment is kept by the browser and <strong>never sent</strong>.</td><td>Browser</td></tr>
+    <tr><td>2</td><td>DNS resolution</td><td>Turn <code>example.com</code> into an IP. Four caches are consulted before the network is touched.</td><td>DNS / Cloudflare</td></tr>
+    <tr><td>3</td><td>TCP handshake</td><td>SYN → SYN-ACK → ACK. One full round trip before a single byte of your data moves.</td><td>Kernel</td></tr>
+    <tr><td>4</td><td>TLS handshake</td><td>Certificate, key agreement, protocol negotiation. One more round trip (TLS 1.3) or two (1.2).</td><td>TLS / certificate authority</td></tr>
+    <tr><td>5</td><td>HTTP request</td><td>The text from Lesson 0005 goes down the socket.</td><td>Browser</td></tr>
+    <tr><td>6</td><td>Server handling</td><td>nginx matches a location, hands dynamic paths to PHP-FPM, PHP runs, the database answers.</td><td><strong>You</strong></td></tr>
+    <tr><td>7</td><td>HTTP response</td><td>Status, headers, body travel back. Time to first byte is measured here.</td><td>You</td></tr>
+    <tr><td>8</td><td>Parse and build</td><td>HTML → DOM, CSS → CSSOM, combined into a render tree.</td><td>Browser</td></tr>
+    <tr><td>9</td><td>Layout, paint, composite</td><td>Compute geometry, fill pixels, hand layers to the GPU.</td><td>Browser / GPU</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="sidenote">Hops 3 and 4 are why HTTPS once felt slow: two extra round trips before any content moves. TLS 1.3 cut it to one, and 0-RTT resumption to zero for repeat visits. This is also why HTTP/3 was built on UDP — it merges the transport and crypto handshakes into a single round trip.</div>
+
+<h2>Where the time actually goes</h2>
+
+<p>Pick a scenario. The bars are milliseconds, roughly to scale, for a small dynamic page.</p>
+
+<div class="widget" id="waterfall">
+  <div class="widget-title">Latency waterfall</div>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:1rem" id="wf-buttons"></div>
+  <div id="wf-chart"></div>
+  <p id="wf-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:1rem 0 0"></p>
+</div>
+
+<div class="callout win">
+  <span class="label">Read the chart, not the folklore</span>
+  <p>On a transatlantic connection, <strong>the network round trips dwarf your PHP</strong>. Shaving 20 ms off a controller is invisible when DNS, TCP and TLS have already spent 350 ms. That is why CDNs and edge caching produce speedups that no amount of code optimisation can match — they remove <em>round trips</em>, not milliseconds.</p>
+  <p>It is also why the advice inverts on localhost, where round trips are free and your code is the only cost. Optimising against the wrong scenario is one of the most common wastes of engineering time.</p>
+</div>
+
+<h2>Hop 2 in detail: DNS is a cache hierarchy</h2>
+
+<p>"DNS turns a name into an IP" is true and hides the interesting part — that four caches are checked first, and a full lookup is rare.</p>
+
+<figure>
+<svg viewBox="0 0 600 168" role="img" aria-label="The DNS resolution chain from browser cache to authoritative nameserver">
+  <rect x="0" y="16" width="104" height="40" rx="3" class="svg-box"/>
+  <text x="52" y="34" class="svg-label" text-anchor="middle">browser</text>
+  <text x="52" y="48" class="svg-small" text-anchor="middle">~1 min cache</text>
+
+  <rect x="120" y="16" width="104" height="40" rx="3" class="svg-box"/>
+  <text x="172" y="34" class="svg-label" text-anchor="middle">OS resolver</text>
+  <text x="172" y="48" class="svg-small" text-anchor="middle">/etc/hosts first</text>
+
+  <rect x="240" y="16" width="120" height="40" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="300" y="34" class="svg-label" text-anchor="middle">recursive resolver</text>
+  <text x="300" y="48" class="svg-small" text-anchor="middle">your ISP, or 1.1.1.1</text>
+
+  <path d="M106 36 L118 36" class="svg-stroke" marker-end="url(#c)"/>
+  <path d="M226 36 L238 36" class="svg-stroke" marker-end="url(#c)"/>
+  <path d="M300 60 L300 76" class="svg-stroke" marker-end="url(#c)"/>
+  <text x="310" y="72" class="svg-small">cache miss — now the real work</text>
+
+  <rect x="240" y="82" width="120" height="30" rx="3" class="svg-box"/>
+  <text x="300" y="101" class="svg-mono" text-anchor="middle">root · "ask .com"</text>
+  <rect x="240" y="118" width="120" height="30" rx="3" class="svg-box"/>
+  <text x="300" y="137" class="svg-mono" text-anchor="middle">.com TLD</text>
+  <path d="M300 116 L300 116" class="svg-stroke"/>
+  <path d="M364 97 C 420 97, 420 120, 420 130" class="svg-stroke" marker-end="url(#c)"/>
+  <path d="M364 133 L 400 133" class="svg-stroke" marker-end="url(#c)"/>
+
+  <rect x="404" y="118" width="150" height="30" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+  <text x="479" y="137" class="svg-mono" text-anchor="middle">authoritative → 93.184.x.x</text>
+  <text x="404" y="100" class="svg-small">whoever your registrar</text>
+  <text x="404" y="112" class="svg-small">points NS records at</text>
+
+  <text x="0" y="80" class="svg-small">every hop</text>
+  <text x="0" y="92" class="svg-small">caches for</text>
+  <text x="0" y="104" class="svg-small">the record's</text>
+  <text x="0" y="116" class="svg-small">TTL — which</text>
+  <text x="0" y="128" class="svg-small">is why DNS</text>
+  <text x="0" y="140" class="svg-small">changes take</text>
+  <text x="0" y="152" class="svg-small">hours</text>
+
+  <defs>
+    <marker id="c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>Two practical consequences. <strong>TTL is why "I changed the DNS an hour ago and it still goes to the old server"</strong> — caches along the chain are still serving the old answer, legitimately. Lower the TTL <em>before</em> a migration, not during it. And <code>/etc/hosts</code> is checked before all of this, which is how you test a new server against the real domain name before any DNS change at all.</figcaption>
+</figure>
+
+<h2>Hops 8 and 9: what the browser does with your text</h2>
+
+<p>Your PHP output is a string. Turning it into pixels is its own pipeline, and the one part of it worth knowing cold is <strong>what blocks</strong>.</p>
+
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Stage</th><th>Produces</th><th>Blocked by</th></tr></thead>
+  <tbody>
+    <tr><td>Parse HTML</td><td>The DOM tree</td><td>A synchronous <code>&lt;script&gt;</code> — parsing stops dead until it downloads and runs</td></tr>
+    <tr><td>Parse CSS</td><td>The CSSOM tree</td><td>Nothing blocks parsing, but <em>rendering</em> waits for all of it</td></tr>
+    <tr><td>Render tree</td><td>DOM + CSSOM, visible nodes only</td><td>Both of the above</td></tr>
+    <tr><td>Layout</td><td>Geometry — position and size of every box</td><td>Recomputed on any size change ("reflow")</td></tr>
+    <tr><td>Paint</td><td>Pixels, in layers</td><td>—</td></tr>
+    <tr><td>Composite</td><td>Layers assembled, usually on the GPU</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>This is the reason for two pieces of advice you have certainly seen without the justification: <strong>CSS goes in the <code>&lt;head&gt;</code></strong> (rendering is blocked until CSSOM is complete, so request it as early as possible), and <strong>scripts go at the end of <code>&lt;body&gt;</code>, or carry <code>defer</code></strong> (a synchronous script halts HTML parsing, because it might call <code>document.write</code>).</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — every rendering strategy is a bet about hop 6 vs hop 8</span>
+  <p>The entire SSR/CSR/SSG argument is about <em>where</em> HTML gets built, and this table is the whole of it:</p>
+  <p><strong>Classic PHP / SSR</strong> — HTML is built per request at hop 6. First paint is fast, the server does work every time. This is WordPress, Laravel, and Next.js in server mode.</p>
+  <p><strong>SSG</strong> — HTML is built at deploy time and served as a static file. Hop 6 becomes nearly free. This is Astro, Hugo, and Next's <code>generateStaticParams</code>.</p>
+  <p><strong>CSR</strong> — the server sends an empty shell plus JavaScript, and the DOM is built in hop 8 on the user's device. Fast to deploy, slow to first paint, and invisible to naive crawlers. This is a plain Vite + React SPA.</p>
+  <p><strong>ISR / edge rendering</strong> — build statically, but regenerate in the background, at a location near the user. Vercel and Cloudflare's whole product line is this bet.</p>
+  <p>None is correct in general. When you can say <em>which hop each one moves work to, and what that costs</em>, you can actually choose — which is precisely the fluency this weekend is for.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l6">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "You point your domain at a new server. Some visitors still reach the old one hours later. Why?",
+      "options": [
+        "Resolvers still hold the record until its TTL expires",
+        "The new server has not finished propagating its route",
+        "The browser refuses to change a cached IP address",
+        "Registrars apply DNS changes on a fixed schedule"
+      ],
+      "answer": 0,
+      "why": "Caches along the chain hold the old answer for the record's TTL, and they are behaving correctly. \"Propagation\" is a misleading word — nothing is being pushed anywhere; old answers are simply expiring. Lower the TTL to 60s a day <em>before</em> a migration."
+    },
+    {
+      "q": "Your PHP responds in 15 ms, but transatlantic users report a slow site. What helps most?",
+      "options": [
+        "A CDN, which removes network round trips",
+        "Faster PHP code, cutting server time further",
+        "A larger database index on the hot table",
+        "Compressing the response body more heavily"
+      ],
+      "answer": 0,
+      "why": "At 150 ms per round trip, DNS + TCP + TLS spend hundreds of milliseconds before your 15 ms even begins. Only moving the content closer removes round trips. Optimising a 15 ms handler is optimising 3% of the problem."
+    },
+    {
+      "q": "A synchronous <code>&lt;script&gt;</code> tag in the <code>&lt;head&gt;</code> delays first paint. What is the mechanism?",
+      "options": [
+        "HTML parsing halts until the script runs",
+        "Scripts are always executed before any CSS",
+        "The DOM is discarded and rebuilt afterwards",
+        "The browser waits for every asset to arrive"
+      ],
+      "answer": 0,
+      "why": "The parser must stop, because the script could call <code>document.write</code> and change the very markup being parsed. No DOM means no render tree means no paint. <code>defer</code> (run after parsing, in order) or <code>async</code> (run whenever, out of order) both release the parser."
+    },
+    {
+      "q": "Which part of a URL never reaches your PHP code?",
+      "options": [
+        "The fragment, after the <code>#</code>",
+        "The query string, after the <code>?</code>",
+        "The port, when it is the default",
+        "The path, when it names a directory"
+      ],
+      "answer": 0,
+      "why": "The fragment is handled entirely by the browser and is never transmitted. It is why single-page-app routers historically used <code>#/route</code> — the server saw only <code>/</code>, so no server configuration was needed at all."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — the classic interview question",
+  "prompt": "\"What happens when you type example.com into a browser and press Enter?\" Answer out loud, aiming for all nine hops in order. Then name which single hop you personally control.",
+  "answer": "<p>(1) Parse the URL — scheme, host, port, path, query, fragment. (2) Resolve DNS, checking browser, OS, and recursive-resolver caches before touching root → TLD → authoritative servers. (3) TCP three-way handshake to the resolved IP on port 443. (4) TLS handshake — validate the certificate, agree keys, negotiate the protocol via ALPN. (5) Send the HTTP request. (6) The server handles it: nginx matches a location and either serves a file or forwards to PHP-FPM, which runs your code and may query a database. (7) The response travels back — status, headers, body. (8) The browser parses HTML into the DOM and CSS into the CSSOM, combining them into a render tree, fetching subresources as it goes. (9) Layout, paint, composite.</p><p><strong>You control hop 6</strong> — and, through the headers you send at hop 7, quite a lot of hops 2, 8 and 9 as well. That is worth saying in an interview: caching headers let you influence work that happens on machines you do not own.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://github.com/alex/what-happens-when">alex/what-happens-when</a> — a community-maintained answer to this exact question, gloriously over-detailed (it starts at the key switch on your keyboard). Do not read it all. Skim it and notice how much depth sits under every one of the nine lines above; treat it as a lifetime backlog.
+  <br><br>
+  For hops 8–9 specifically: <a href="https://web.dev/articles/critical-rendering-path">web.dev — The Critical Rendering Path</a>.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0006" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Try: <em>"walk me through a real TLS handshake packet by packet"</em>, <em>"what exactly does a CDN cache for a logged-in user's page?"</em> (the answer is "almost nothing, and that's why edge rendering exists"), or <em>"show me how to read the Network tab waterfall in Chrome DevTools against my own server.php"</em>.
+  </div>
+
+  <div class="nextprev">
+    <a href="0005-http-is-text.html">← 0005 — HTTP Is Just Text</a>
+    <a href="0007-server-vs-runtime.html">0007 — Web Server vs Application Runtime →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const SCENARIOS = {
+      "localhost": {
+        note: "No network to speak of. Your code is essentially the entire cost — which is exactly why local benchmarks mislead you about production.",
+        bars: [["DNS", 0], ["TCP", 0.2], ["TLS", 0], ["Server (PHP + DB)", 18], ["Download", 1], ["Render", 12]],
+      },
+      "Same country": {
+        note: "One round trip is about 20 ms. Network and server are now comparable, and both are worth attention.",
+        bars: [["DNS", 18], ["TCP", 20], ["TLS", 22], ["Server (PHP + DB)", 25], ["Download", 14], ["Render", 14]],
+      },
+      "Transatlantic": {
+        note: "At ~150 ms per round trip, three handshakes cost more than half a second before your code starts. Making PHP twice as fast changes almost nothing here.",
+        bars: [["DNS", 140], ["TCP", 150], ["TLS", 165], ["Server (PHP + DB)", 28], ["Download", 90], ["Render", 15]],
+      },
+      "Transatlantic + CDN": {
+        note: "The CDN edge is near the user, so DNS, TCP and TLS all terminate locally. If the page is cacheable the origin is never touched at all — the single biggest win available, and it required no code change.",
+        bars: [["DNS", 12], ["TCP", 14], ["TLS", 16], ["Edge cache hit", 4], ["Download", 18], ["Render", 15]],
+      },
+    };
+
+    const buttons = document.getElementById("wf-buttons");
+    const chart = document.getElementById("wf-chart");
+    const note = document.getElementById("wf-note");
+
+    const paint = (name) => {
+      const { bars, note: text } = SCENARIOS[name];
+      const total = bars.reduce((sum, [, ms]) => sum + ms, 0);
+      const max = Math.max(...bars.map(([, ms]) => ms));
+
+      chart.innerHTML = bars.map(([label, ms]) => {
+        const width = max ? Math.max(ms / max * 100, ms ? 1.5 : 0) : 0;
+        const isServer = label.startsWith("Server");
+        const colour = isServer ? "var(--accent)" : label === "Render" ? "var(--link)" : "var(--ink-faint)";
+        return `<div style="display:flex;align-items:center;gap:0.6rem;margin:0.3rem 0">
+          <span style="flex:0 0 8.5rem;font-family:var(--sans);font-size:0.76rem;${isServer ? "color:var(--accent);font-weight:650" : ""}">${label}</span>
+          <span style="flex:1;background:var(--paper);border-radius:2px;height:1.05rem;position:relative;border:1px solid var(--rule-soft)">
+            <span style="position:absolute;inset:0 auto 0 0;width:${width}%;background:${colour};border-radius:2px"></span>
+          </span>
+          <span style="flex:0 0 3.2rem;text-align:right;font-family:var(--mono);font-size:0.74rem">${ms} ms</span>
+        </div>`;
+      }).join("") +
+      `<div style="border-top:1px solid var(--rule);margin-top:0.6rem;padding-top:0.5rem;display:flex;justify-content:space-between;
+        font-family:var(--sans);font-size:0.8rem">
+        <span>total to interactive</span><strong style="font-family:var(--mono)">${total.toFixed(0)} ms</strong></div>`;
+
+      note.innerHTML = text;
+      [...buttons.children].forEach((b) => b.classList.toggle("primary", b.textContent === name));
+    };
+
+    for (const name of Object.keys(SCENARIOS)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = name;
+      button.addEventListener("click", () => paint(name));
+      buttons.append(button);
+    }
+
+    paint("Transatlantic");
+  })();
+</script>

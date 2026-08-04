@@ -1,0 +1,245 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 4 — Request, Response, Middleware, Container</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Stretch project</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Project 4</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Request, Response, Middleware, Container</h1>
+<p class="subtitle">The last step before your code stops being "an application" and starts being "a framework". Optional — but this is the one that makes Laravel's source readable.</p>
+
+<div class="meta"><span>~1.5 hours</span><span>Stretch goal</span><span>Skip if you're tired — it keeps</span></div>
+
+<div class="callout warn">
+  <span class="label">Read this first</span>
+  <p>If it is Sunday evening and you are running low, <strong>stop after Project 3</strong>. You have covered the mission. This project is genuinely optional and loses nothing by waiting two weeks — in fact it pairs well with the follow-up sessions, since by then you will have seen Laravel's real versions in your course.</p>
+  <p>If you do have energy: this is the most intellectually satisfying two hours of the weekend.</p>
+</div>
+
+<h2>Four upgrades</h2>
+
+<h3>1 — A Response object</h3>
+
+<p>You have a <code>Request</code>. Right now the response side is scattered: <code>http_response_code()</code> here, <code>header()</code> there, <code>echo</code> somewhere else. Make it a value too.</p>
+
+<pre><code><span class="k">final class</span> Response
+{
+    <span class="k">public function</span> __construct(
+        <span class="k">public readonly string</span> <span class="n">$body</span> = <span class="s">''</span>,
+        <span class="k">public readonly int</span>    <span class="n">$status</span> = 200,
+        <span class="k">public readonly array</span>  <span class="n">$headers</span> = [],
+    ) {}
+
+    <span class="k">public static function</span> html(<span class="k">string</span> <span class="n">$body</span>, <span class="k">int</span> <span class="n">$status</span> = 200): <span class="k">self</span>
+    {
+        <span class="k">return new self</span>(<span class="n">$body</span>, <span class="n">$status</span>, [<span class="s">'Content-Type'</span> =&gt; <span class="s">'text/html; charset=utf-8'</span>]);
+    }
+
+    <span class="k">public static function</span> json(<span class="k">array</span> <span class="n">$data</span>, <span class="k">int</span> <span class="n">$status</span> = 200): <span class="k">self</span>
+    {
+        <span class="k">return new self</span>(json_encode(<span class="n">$data</span>, JSON_THROW_ON_ERROR), <span class="n">$status</span>,
+            [<span class="s">'Content-Type'</span> =&gt; <span class="s">'application/json'</span>]);
+    }
+
+    <span class="k">public static function</span> redirect(<span class="k">string</span> <span class="n">$to</span>, <span class="k">int</span> <span class="n">$status</span> = 303): <span class="k">self</span>
+    {
+        <span class="k">return new self</span>(<span class="s">''</span>, <span class="n">$status</span>, [<span class="s">'Location'</span> =&gt; <span class="n">$to</span>]);
+    }
+
+    <span class="k">public function</span> send(): <span class="k">void</span>
+    {
+        http_response_code(<span class="n">$this</span>-&gt;status);
+        <span class="k">foreach</span> (<span class="n">$this</span>-&gt;headers <span class="k">as</span> <span class="n">$name</span> =&gt; <span class="n">$value</span>) {
+            header(<span class="s">"{$name}: {$value}"</span>);
+        }
+        <span class="k">echo</span> <span class="n">$this</span>-&gt;body;
+    }
+}</code></pre>
+
+<div class="callout win">
+  <span class="label">Why this is a bigger change than it looks</span>
+  <p><strong>Controllers now <code>return</code> instead of <code>echo</code>.</strong> That single shift means a controller is a pure function from Request to Response — no side effects, nothing written to output. Which means:</p>
+  <ul style="margin:0.5rem 0">
+    <li>You can <strong>test</strong> it: call it, assert on <code>$response->status</code>. No server, no browser, no output buffering.</li>
+    <li>You can <strong>wrap</strong> it: middleware can inspect or modify the response on its way out.</li>
+    <li>The "headers already sent" error becomes <strong>structurally impossible</strong> — nothing outputs until <code>send()</code>.</li>
+  </ul>
+  <p>This is <a href="https://www.php-fig.org/psr/psr-7/">PSR-7</a>'s core design, and it is why every modern PHP framework converged on it.</p>
+</div>
+
+<h3>2 — A middleware pipeline</h3>
+
+<pre><code><span class="k">interface</span> Middleware
+{
+    <span class="k">public function</span> handle(Request <span class="n">$request</span>, Closure <span class="n">$next</span>): Response;
+}
+
+<span class="k">final class</span> RequireAuth <span class="k">implements</span> Middleware
+{
+    <span class="k">public function</span> handle(Request <span class="n">$request</span>, Closure <span class="n">$next</span>): Response
+    {
+        <span class="k">if</span> (! isset(<span class="n">$_SESSION</span>[<span class="s">'user_id'</span>])) {
+            <span class="k">return</span> Response::redirect(<span class="s">'/login'</span>);      <span class="c">// short-circuit — $next never called</span>
+        }
+
+        <span class="k">return</span> <span class="n">$next</span>(<span class="n">$request</span>);                       <span class="c">// carry on down the chain</span>
+    }
+}</code></pre>
+
+<p>The pipeline itself is the interesting part — build it with <code>array_reduce</code>, walking the list backwards to nest the closures:</p>
+
+<pre><code><span class="k">function</span> pipeline(<span class="k">array</span> <span class="n">$middleware</span>, Closure <span class="n">$destination</span>): Closure
+{
+    <span class="k">return</span> array_reduce(
+        array_reverse(<span class="n">$middleware</span>),
+        <span class="k">fn</span> (Closure <span class="n">$next</span>, Middleware <span class="n">$layer</span>) =&gt;
+            <span class="k">fn</span> (Request <span class="n">$request</span>) =&gt; <span class="n">$layer</span>-&gt;handle(<span class="n">$request</span>, <span class="n">$next</span>),
+        <span class="n">$destination</span>
+    );
+}</code></pre>
+
+<div class="callout foundation">
+  <span class="label">Foundation — This is the onion, and it is just closures</span>
+  <p>Each layer receives the request <em>and the rest of the pipeline as a callable</em>. It may act before calling <code>$next</code>, after, both, or refuse to call it at all — which is what short-circuiting is.</p>
+  <p>Execution order is an onion: <code>A → B → C → controller → C → B → A</code>. A layer that starts a timer before <code>$next</code> and logs after it has measured everything inside, with no coordination.</p>
+  <p><strong>This is the callback pattern from <a href="../lessons/0012-functions-and-the-stack.html">Lesson 0012</a>, arranged in a chain.</strong> Laravel's <code>Illuminate\Pipeline</code> is the same <code>array_reduce</code>. Express's <code>app.use()</code>, Django's middleware, and <a href="https://www.php-fig.org/psr/psr-15/">PSR-15</a> are all this shape. Once you have written it, framework middleware stops being a configuration item and becomes something you can reason about.</p>
+</div>
+
+<h3>3 — A container</h3>
+
+<pre><code><span class="k">final class</span> Container
+{
+    <span class="k">private array</span> <span class="n">$bindings</span> = [];
+    <span class="k">private array</span> <span class="n">$instances</span> = [];
+
+    <span class="k">public function</span> bind(<span class="k">string</span> <span class="n">$key</span>, Closure <span class="n">$factory</span>): <span class="k">void</span>
+    {
+        <span class="n">$this</span>-&gt;bindings[<span class="n">$key</span>] = <span class="n">$factory</span>;
+    }
+
+    <span class="k">public function</span> singleton(<span class="k">string</span> <span class="n">$key</span>, Closure <span class="n">$factory</span>): <span class="k">void</span>
+    {
+        <span class="n">$this</span>-&gt;bind(<span class="n">$key</span>, <span class="k">function</span> () <span class="k">use</span> (<span class="n">$key</span>, <span class="n">$factory</span>) {
+            <span class="k">return</span> <span class="n">$this</span>-&gt;instances[<span class="n">$key</span>] ??= <span class="n">$factory</span>(<span class="n">$this</span>);
+        });
+    }
+
+    <span class="k">public function</span> resolve(<span class="k">string</span> <span class="n">$key</span>): <span class="k">mixed</span>
+    {
+        <span class="k">if</span> (! isset(<span class="n">$this</span>-&gt;bindings[<span class="n">$key</span>])) {
+            <span class="k">throw new</span> RuntimeException(<span class="s">"Nothing bound for [{$key}]"</span>);
+        }
+
+        <span class="k">return</span> (<span class="n">$this</span>-&gt;bindings[<span class="n">$key</span>])(<span class="n">$this</span>);
+    }
+}</code></pre>
+
+<pre><code><span class="n">$container</span>-&gt;singleton(Database::<span class="k">class</span>, <span class="k">fn</span> () =&gt; <span class="k">new</span> Database(<span class="n">$config</span>[<span class="s">'database'</span>]));
+
+<span class="n">$db</span> = <span class="n">$container</span>-&gt;resolve(Database::<span class="k">class</span>);</code></pre>
+
+<p>That is roughly forty lines and it is <strong>the core of Laravel's service container</strong> — a map of keys to factory closures, with an instance cache for singletons. What Laravel adds is <em>autowiring</em>: reading a constructor's type hints via reflection and resolving them recursively, so you rarely register anything by hand.</p>
+
+<div class="callout win">
+  <span class="label">What the container actually buys you</span>
+  <p>It replaces <code>$db</code> arriving invisibly through shared scope with a controller that <em>declares</em> what it needs. The dependency becomes visible in the signature, and — the real payoff — you can substitute a fake in a test:</p>
+  <pre style="margin:0.6rem 0"><code>$container->bind(Database::class, fn () => new InMemoryDatabase());</code></pre>
+  <p>Your controller is now testable without MySQL running. That property is the entire justification for dependency injection, and it is much easier to appreciate having felt the shared-variable version first.</p>
+</div>
+
+<h3>4 — Actual tests</h3>
+
+<p>No framework needed. A plain PHP file and <code>assert</code> is enough to prove the point:</p>
+
+<div class="filename">tests/router.test.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+declare(strict_types=1);
+
+<span class="k">require</span> __DIR__ . <span class="s">'/../src/bootstrap.php'</span>;
+
+<span class="n">$tests</span> = 0;
+<span class="n">$failed</span> = 0;
+
+<span class="k">function</span> test(<span class="k">string</span> <span class="n">$name</span>, <span class="k">callable</span> <span class="n">$fn</span>): <span class="k">void</span>
+{
+    <span class="k">global</span> <span class="n">$tests</span>, <span class="n">$failed</span>;
+    <span class="n">$tests</span>++;
+
+    <span class="k">try</span> {
+        <span class="n">$fn</span>();
+        echo <span class="s">"  ✓ {$name}\n"</span>;
+    } <span class="k">catch</span> (Throwable <span class="n">$e</span>) {
+        <span class="n">$failed</span>++;
+        echo <span class="s">"  ✕ {$name}\n    {$e->getMessage()}\n"</span>;
+    }
+}
+
+test(<span class="s">'captures a route parameter'</span>, <span class="k">function</span> () <span class="k">use</span> (<span class="n">$router</span>) {
+    <span class="n">$match</span> = <span class="n">$router</span>-&gt;match(<span class="k">new</span> Request(<span class="s">'GET'</span>, <span class="s">'/notes/17'</span>));
+
+    <span class="k">if</span> (<span class="n">$match</span>-&gt;params[<span class="s">'id'</span>] !== <span class="s">'17'</span>) {
+        <span class="k">throw new</span> Exception(<span class="s">'expected id 17, got '</span> . var_export(<span class="n">$match</span>-&gt;params, <span class="k">true</span>));
+    }
+});
+
+test(<span class="s">'prefers a literal route over a dynamic one'</span>, <span class="k">function</span> () <span class="k">use</span> (<span class="n">$router</span>) { … });
+test(<span class="s">'405 when the path matches but the method does not'</span>, … );
+test(<span class="s">'query string is excluded from matching'</span>, … );
+test(<span class="s">'anchors prevent /evil/notes/17 matching'</span>, … );
+
+echo <span class="s">"\n{$tests} tests, {$failed} failed\n"</span>;
+exit(<span class="n">$failed</span> === 0 ? 0 : 1);   <span class="c">// exit code — Lesson 0003</span></code></pre>
+
+<pre><code>php tests/router.test.php; echo "exit: $?"</code></pre>
+
+<p>Note the exit code. That is what makes this runnable in CI — a test script that always exits 0 tells a pipeline nothing, which is the Lesson 0003 point arriving with consequences.</p>
+
+<h2>Commit and tag</h2>
+
+<pre><code>git add .
+git commit -m "Add Response objects, a middleware pipeline and a DI container
+
+Controllers now return Response objects instead of echoing, making them
+pure functions from Request to Response and therefore testable without a
+server. Middleware composes via array_reduce into a nested closure chain
+that can short-circuit. A small container maps keys to factory closures
+so dependencies are declared rather than inherited from shared scope."
+
+git tag -a m4-framework-core -m "Milestone 4: request/response, middleware, container"
+git push origin main --tags</code></pre>
+
+<div class="callout bridge">
+  <span class="label">Now go and read the real thing</span>
+  <p>With this fresh, read <a href="https://symfony.com/doc/current/components/http_kernel.html">Symfony's HttpKernel</a> and <a href="https://laravel.com/docs/lifecycle">Laravel's request lifecycle</a>. You will recognise nearly all of it, and the parts you don't will be <em>features</em> rather than mysteries.</p>
+  <p>That is the whole goal of the weekend, and this project is where it becomes literally true: you are not reading about a framework, you are reading a more complete version of something you wrote.</p>
+</div>
+
+<div class="ask">
+  <strong>Ask freely.</strong> <em>"Explain the array_reduce pipeline line by line"</em> — it is dense and genuinely worth unpacking. Or: <em>"add autowiring with reflection to my container"</em>, which is about twenty lines and is the exact trick Laravel uses.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="P4" type="button">Mark this project complete</button>
+
+  <div class="nextprev">
+    <a href="03-notes-app.html">← Project 3 — The notes app</a>
+    <a href="../START-HERE.html">Syllabus →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

@@ -1,0 +1,196 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shell Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Reference</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Shell</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="glossary.html">Glossary</a>
+    <a href="#" onclick="window.print();return false">Print</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Shell Cheat Sheet</h1>
+<p class="subtitle">Not just what to type — what each command <em>is</em>, because that's what makes the rest guessable.</p>
+
+<h2>What happens when you press Enter</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td>1–4</td><td><strong>Expansion</strong> — split into words; expand <code>~</code>, <code>$VAR</code>, <code>$(cmd)</code>, globs like <code>*.php</code></td></tr>
+    <tr><td>5–6</td><td>Strip quotes; set up redirections</td></tr>
+    <tr><td>7</td><td>Is word 1 a <strong>builtin</strong>? If so run it in-process and stop</td></tr>
+    <tr><td>8</td><td>Otherwise walk <code>$PATH</code> left to right; <strong>first match wins</strong></td></tr>
+    <tr><td>9–11</td><td><code>fork()</code> → <code>exec()</code> → parent waits and collects the exit code</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Expansion happens <em>before</em> the program sees anything. <code>rm *</code> is dangerous because <code>rm</code> never sees <code>*</code> — bash already replaced it with every filename.</p>
+
+<h2>Navigation and inspection</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><code>pwd</code></td><td>Where am I</td></tr>
+    <tr><td><code>cd -</code></td><td>Back to the previous directory</td></tr>
+    <tr><td><code>ls -lah</code></td><td>Long, all (incl. hidden), human sizes</td></tr>
+    <tr><td><code>ls -li</code></td><td>Show inode numbers — proves hard links share one</td></tr>
+    <tr><td><code>tree -L 2</code></td><td>Directory tree, two levels deep</td></tr>
+    <tr><td><code>find . -name '*.php'</code></td><td>Find by name, recursively</td></tr>
+    <tr><td><code>du -sh *</code></td><td>Size of each entry here</td></tr>
+    <tr><td><code>df -h</code></td><td>Free disk space</td></tr>
+    <tr><td><code>file X</code></td><td>What is this, by magic bytes — not by extension</td></tr>
+    <tr><td><code>stat X</code></td><td>The inode's contents</td></tr>
+    <tr><td><code>xxd X | head</code></td><td>Raw bytes as hex</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Finding out what a command is</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><code>which php</code></td><td>First match on <code>$PATH</code></td></tr>
+    <tr><td><code>which -a php</code></td><td><strong>Every</strong> match, in search order — finds the imposter</td></tr>
+    <tr><td><code>type cd</code></td><td>Builtin? alias? function? file?</td></tr>
+    <tr><td><code>command -v php</code></td><td>The portable, script-safe form</td></tr>
+    <tr><td><code>hash -r</code></td><td>Clear bash's lookup cache after installing something</td></tr>
+    <tr><td><code>echo $PATH | tr ':' '\n'</code></td><td>The search list, one per line</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Streams, redirection, pipes</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>fd</th><th>Stream</th><th>Carries</th></tr></thead>
+  <tbody>
+    <tr><td><code>0</code></td><td>stdin</td><td>Input</td></tr>
+    <tr><td><code>1</code></td><td>stdout</td><td><strong>Results</strong> — the thing the command produces</td></tr>
+    <tr><td><code>2</code></td><td>stderr</td><td><strong>Diagnostics</strong> — errors, progress, warnings</td></tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code>cmd &gt; out.txt         <span class="c"># stdout to file (truncate)</span>
+cmd &gt;&gt; out.txt        <span class="c"># stdout to file (append)</span>
+cmd 2&gt; err.log        <span class="c"># stderr to file</span>
+cmd &gt; out 2&gt;&amp;1        <span class="c"># both to one file</span>
+cmd 2&gt; /dev/null      <span class="c"># discard errors</span>
+cmd &lt; in.txt          <span class="c"># file as stdin</span>
+a | b                 <span class="c"># a's STDOUT to b's stdin — stderr is NOT carried</span>
+a 2&gt;&amp;1 | b            <span class="c"># pipe both</span>
+cmd | tee f.txt       <span class="c"># to screen AND file</span></code></pre>
+
+<p><strong>The rule that makes tooling composable:</strong> results on stdout, diagnostics on stderr. A CLI that prints progress to stdout poisons every pipeline it's used in.</p>
+
+<h2>Exit codes and chaining</h2>
+
+<pre><code>echo $?               <span class="c"># exit code of the last command</span>
+a &amp;&amp; b                <span class="c"># run b only if a succeeded (0)</span>
+a || b                <span class="c"># run b only if a failed (non-zero)</span>
+a ; b                 <span class="c"># run b regardless</span></code></pre>
+
+<p>Zero means success — one way to succeed, many ways to fail. Start every script with:</p>
+
+<pre><code>set -euo pipefail</code></pre>
+
+<div class="table-scroll">
+<table>
+  <tbody>
+    <tr><td><code>-e</code></td><td>Exit on any command failing</td></tr>
+    <tr><td><code>-u</code></td><td>Error on an undefined variable — catches typos in names</td></tr>
+    <tr><td><code>-o pipefail</code></td><td>A pipeline fails if <em>any</em> stage fails, not just the last</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Quoting</h2>
+
+<pre><code>name=world
+echo "hello $name"    <span class="c"># hello world  — double quotes expand</span>
+echo 'hello $name'    <span class="c"># hello $name  — single quotes are literal</span>
+echo "$(date)"        <span class="c"># command substitution</span>
+"$var"                <span class="c"># ALWAYS quote variables — unquoted splits on spaces</span></code></pre>
+
+<p>Same rule as PHP's quotes, one layer down. Quoting marks a region as <strong>data rather than code</strong> — the identical principle behind HTML escaping and prepared statements.</p>
+
+<h2>Processes and ports</h2>
+
+<pre><code>php -S localhost:8888 &amp;      <span class="c"># run in background</span>
+jobs                         <span class="c"># background jobs of this shell</span>
+fg %1 / kill %1              <span class="c"># foreground / kill job 1</span>
+ps aux | grep php            <span class="c"># find processes</span>
+kill -9 PID                  <span class="c"># force kill</span>
+
+ss -ltnp                     <span class="c"># what is listening, and which PID</span>
+ss -ltnp | grep 8888         <span class="c"># who has my port? (the 'Address already in use' answer)</span>
+lsof -i :8888                <span class="c"># same, if lsof is installed</span>
+
+ls -l /proc/PID/fd           <span class="c"># a process's open file descriptors</span>
+cat /proc/PID/environ | tr '\0' '\n'
+strace -e trace=network php server.php   <span class="c"># watch the syscalls</span></code></pre>
+
+<h2>Text</h2>
+
+<pre><code>grep -rn 'pattern' .         <span class="c"># recursive, with line numbers</span>
+grep -i / -v / -c            <span class="c"># case-insensitive / invert / count</span>
+head -20 f / tail -f f       <span class="c"># first 20 lines / follow a log live</span>
+wc -l f                      <span class="c"># count lines</span>
+sort | uniq -c | sort -rn    <span class="c"># frequency count, most common first</span>
+cut -d' ' -f1                <span class="c"># field 1, space-delimited</span>
+sed 's/old/new/g' f          <span class="c"># substitute</span></code></pre>
+
+<h2>Keys worth having in your fingers</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Interrupt the foreground process</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>End of input — exits the shell</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>R</kbd></td><td><strong>Search command history</strong> — the highest-value one here</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>Clear the screen</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>E</kbd></td><td>Start / end of line</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Delete the previous word</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>.</kbd></td><td>Insert the last argument of the previous command</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>WSL specifics</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><code>/mnt/c/...</code></td><td>Windows drive. <strong>Slow</strong>, and permissions are largely fictional</td></tr>
+    <tr><td><code>~/...</code></td><td>Real Linux filesystem. Keep projects here</td></tr>
+    <tr><td><code>explorer.exe .</code></td><td>Open the current directory in Windows Explorer</td></tr>
+    <tr><td><code>code .</code></td><td>Open in VS Code with the WSL remote extension</td></tr>
+    <tr><td><code>sudo service mariadb start</code></td><td>WSL has no systemd by default — use <code>service</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer class="lesson-foot">
+  <div class="nextprev">
+    <a href="http-cheatsheet.html">← HTTP cheat sheet</a>
+    <a href="php-cheatsheet.html">PHP cheat sheet →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

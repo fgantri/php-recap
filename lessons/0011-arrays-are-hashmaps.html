@@ -1,0 +1,266 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0011 — Arrays Are Hash Maps</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0011</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Arrays Are Hash Maps</h1>
+<p class="subtitle">PHP has one array type where other languages have three. Knowing what it really is turns "which function should I use" into a cost calculation you can do in your head.</p>
+
+<div class="meta"><span>45 minutes</span><span>Win: know the cost of every array operation</span></div>
+
+<p>Your course said it exactly: PHP's array is an <strong>ordered hash map</strong>, serving as list and dictionary at once. That single sentence has consequences the course didn't have room for — including one that makes a loop go from instant to unusable.</p>
+
+<h2>How a key finds its value</h2>
+
+<p>A hash function turns your key into a number. That number, modulo the table size, is a slot. Look in the slot, and there is your value — in roughly the same time whether the array holds ten entries or ten million.</p>
+
+<div class="widget" id="hash">
+  <div class="widget-title">Hash table — insert a key and watch it land</div>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;margin-bottom:0.9rem" class="controls">
+    <input type="text" id="hash-key" value="author" style="width:8rem" spellcheck="false">
+    <button type="button" id="hash-add" class="primary">Insert</button>
+    <button type="button" id="hash-reset">Reset</button>
+    <span style="font-family:var(--sans);font-size:0.76rem;color:var(--ink-faint)">table size 8</span>
+  </div>
+  <div id="hash-table"></div>
+  <p id="hash-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.9rem 0 0"></p>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Collisions, and why lookup is still fast</span>
+  <p>Two different keys can hash to the same slot. That is a <span class="term">collision</span>, and it is unavoidable — you are mapping infinitely many possible keys onto a finite number of slots.</p>
+  <p>PHP handles it by chaining: the slot holds a linked list, and lookup walks it comparing actual keys. With a good hash function collisions are rare, so the average chain is near length 1 and lookup is <strong>O(1) on average</strong>. In the pathological case where every key collides, it degrades to O(n) — which is a real attack (hash-flooding), and why PHP randomises its string hash seed per process.</p>
+</div>
+
+<h2>The optimisation that changes everything: packed arrays</h2>
+
+<p>Since PHP 7, an array whose keys are sequential integers starting at 0 — that is, an ordinary list — <strong>skips the hash table entirely</strong>. PHP stores the values in a flat contiguous block and uses the index as a direct offset, exactly like a C array.</p>
+
+<pre><code><span class="n">$packed</span> = [<span class="s">'a'</span>, <span class="s">'b'</span>, <span class="s">'c'</span>];              <span class="c">// packed: flat memory, fast, small</span>
+<span class="n">$packed</span>[] = <span class="s">'d'</span>;                          <span class="c">// still packed</span>
+
+<span class="n">$hashed</span> = [<span class="s">'a'</span>, <span class="s">'b'</span>, <span class="s">'c'</span>];
+<span class="n">$hashed</span>[100] = <span class="s">'d'</span>;                       <span class="c">// gap! converts to a real hash table</span>
+
+unset(<span class="n">$packed</span>[0]);                        <span class="c">// also converts — keys are no longer 0..n</span></code></pre>
+
+<p>This is why <code>array_values()</code> after <code>array_filter()</code> is more than cosmetic. Your course flagged that <code>array_filter</code> preserves keys, giving you <code>[2 => 'c']</code>. That array is now <em>hashed</em> — bigger and slower — and <code>array_values()</code> repacks it.</p>
+
+<h2>The cost table</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Operation</th><th>Cost</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td><code>$a[$k]</code>, <code>isset($a[$k])</code></td><td>O(1)</td><td>Hash lookup, or a direct offset when packed</td></tr>
+    <tr><td><code>$a[] = $v</code></td><td>O(1) amortised</td><td>Occasionally reallocates and rehashes — hence "amortised"</td></tr>
+    <tr><td><code>count($a)</code></td><td>O(1)</td><td>Stored, not counted. Safe inside a loop condition</td></tr>
+    <tr><td><code>in_array($v, $a)</code></td><td><strong>O(n)</strong></td><td>Scans every element. The one that ruins loops</td></tr>
+    <tr><td><code>array_search($v, $a)</code></td><td><strong>O(n)</strong></td><td>Same scan, returns the key</td></tr>
+    <tr><td><code>array_key_exists($k, $a)</code></td><td>O(1)</td><td>Hash lookup — a <em>key</em> question, not a value one</td></tr>
+    <tr><td><code>array_merge($a, $b)</code></td><td>O(n+m)</td><td>Inside a loop this becomes O(n²) — a classic mistake</td></tr>
+    <tr><td><code>sort</code>, <code>usort</code></td><td>O(n log n)</td><td>—</td></tr>
+    <tr><td><code>array_unshift</code></td><td><strong>O(n)</strong></td><td>Every element must be reindexed</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout danger">
+  <span class="label">The O(n²) loop, which you will write at least once</span>
+  <pre style="margin:0.6rem 0"><code>// 10,000 orders, 10,000 known ids → 100,000,000 comparisons
+foreach ($orders as $order) {
+    if (in_array($order['id'], $knownIds)) { ... }
+}
+
+// Flip the array once; every lookup is now a hash hit
+$known = array_flip($knownIds);
+foreach ($orders as $order) {
+    if (isset($known[$order['id']])) { ... }
+}</code></pre>
+  <p>Seconds become milliseconds. The technique — <strong>turn a list you search repeatedly into a set you look up</strong> — is one of the highest-value habits in everyday programming, and it applies in every language.</p>
+</div>
+
+<h2>The <code>foreach</code> trap</h2>
+
+<p>Your course noted that <code>foreach</code> iterates a copy, which prevents a family of bugs. True — with one exception that creates a much nastier one:</p>
+
+<pre><code><span class="k">foreach</span> (<span class="n">$items</span> <span class="k">as</span> &amp;<span class="n">$item</span>) {
+    <span class="n">$item</span> = strtoupper(<span class="n">$item</span>);
+}
+<span class="c">// $item is STILL a reference to the last element here</span>
+
+<span class="k">foreach</span> (<span class="n">$items</span> <span class="k">as</span> <span class="n">$item</span>) { }   <span class="c">// this overwrites the last element, repeatedly</span></code></pre>
+
+<p>With <code>['a','b','c']</code> you end up with <code>['A','B','B']</code>. The reference outlives the loop, so the second <code>foreach</code> assigns into the last slot on every pass. <strong>Always <code>unset($item);</code> after a by-reference foreach</strong> — or avoid <code>&amp;</code> entirely and use <code>array_map</code>.</p>
+
+<div class="widget" data-quiz data-seed="l11">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "A loop over 10,000 records calls <code>in_array()</code> against a 10,000-item list and takes 30 seconds. Best fix?",
+      "options": [
+        "Flip the list to keys and use <code>isset()</code>",
+        "Sort the list first so the scan exits early",
+        "Cache the list in a static variable outside",
+        "Replace the loop with <code>array_filter()</code>"
+      ],
+      "answer": 0,
+      "why": "<code>in_array</code> is O(n), so the pair is O(n²) — 100 million comparisons. <code>array_flip</code> once, then O(1) <code>isset</code> lookups, gives O(n) overall. Sorting doesn't help because <code>in_array</code> scans linearly regardless."
+    },
+    {
+      "q": "Why does <code>array_values()</code> after <code>array_filter()</code> matter beyond tidiness?",
+      "options": [
+        "It repacks the array, restoring the fast layout",
+        "It removes elements the filter failed to drop",
+        "It guarantees the original insertion order",
+        "It converts string keys back into integers"
+      ],
+      "answer": 0,
+      "why": "Filtering leaves gaps in the integer keys, which forces the array out of PHP 7's packed representation into a full hash table — more memory, slower access. <code>array_values</code> renumbers from 0 and repacks. It also matters for <code>json_encode</code>, which emits an object rather than an array when keys aren't sequential."
+    },
+    {
+      "q": "After <code>foreach ($a as &$v) {}</code> followed by <code>foreach ($a as $v) {}</code>, what is wrong?",
+      "options": [
+        "The last element is overwritten on every pass",
+        "The first element is skipped by the second loop",
+        "The array is silently converted to a hash table",
+        "The second loop iterates the original, not a copy"
+      ],
+      "answer": 0,
+      "why": "<code>$v</code> is still a reference to the final element. Each iteration of the second loop assigns the current value <em>through</em> that reference. The fix is <code>unset($v);</code> immediately after the first loop — or don't use <code>&amp;</code>."
+    },
+    {
+      "q": "<code>$data = ['name' => null];</code> — which is true?",
+      "options": [
+        "<code>array_key_exists</code> true, <code>isset</code> false",
+        "Both return true, since the key is present",
+        "Both return false, since the value is null",
+        "<code>isset</code> true, <code>array_key_exists</code> false"
+      ],
+      "answer": 0,
+      "why": "<code>isset</code> asks \"is there a usable non-null value\"; <code>array_key_exists</code> asks \"is the key present\". Choosing wrongly produces bugs that appear only for null values — which is to say, only in production."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — one array type is a real design decision</span>
+  <p>JavaScript separates <code>Array</code> (indexed, ordered) from <code>Object</code> and <code>Map</code> (keyed). Python separates <code>list</code> from <code>dict</code>. PHP fuses them, which is why <code>json_encode</code> has to guess: sequential integer keys become a JSON array <code>[...]</code>, anything else becomes an object <code>{...}</code>.</p>
+  <p>That guess is a genuine source of API bugs. Filter a list, forget <code>array_values()</code>, and your endpoint silently changes shape from <code>[{...}]</code> to <code>{"2":{...}}</code> — breaking every client. Use <code>JSON_PRETTY_PRINT</code> and look at the output when you build an API; it takes ten seconds and catches this class of bug permanently.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Explain why <code>in_array()</code> and <code>array_key_exists()</code> have different costs, given that PHP has only one array type. Then say what \"packed\" means and what breaks it.",
+  "answer": "<p><strong>Different costs:</strong> the hash table indexes <em>keys</em>, not values. <code>array_key_exists</code> hashes the key and goes straight to a slot — O(1). <code>in_array</code> is asking about values, which are not indexed at all, so it must walk every element and compare — O(n). One array type, but only one of the two things in it is indexed.</p><p><strong>Packed:</strong> when an array's keys are exactly the integers 0..n-1, PHP skips the hash table and stores values in a flat contiguous block, using the index as a direct memory offset. It is smaller and faster. It breaks the moment the keys stop being sequential from zero — a gap from <code>unset()</code>, a filter that preserved keys, or an explicit high index like <code>$a[100]</code>. <code>array_values()</code> restores it.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.phpinternalsbook.com/php7/hashtables/basic_structure.html">PHP Internals Book — Hashtables</a> for the real structure, including the packed-array optimisation. If you read one section, read that one — it makes the cost table above obvious rather than memorised.
+  <br><br>
+  Then keep <a href="https://www.php.net/manual/en/ref.array.php">the array function reference</a> open while you work. It is large, inconsistently named for historical reasons, and worth browsing once end to end.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0011" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Try: <em>"write me a benchmark proving the in_array vs isset difference"</em> (satisfying, and about eight lines), or <em>"what's the difference between array_map, array_filter and array_reduce, with one example where reduce is clearly right?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0010-truth-and-coercion.html">← 0010 — Truth, Comparison, Coercion</a>
+    <a href="0012-functions-and-the-stack.html">0012 — Functions, the Stack, Closures →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const SIZE = 8;
+    const table = Array.from({ length: SIZE }, () => []);
+
+    const hash = (key) => {
+      let value = 5381;
+      for (const char of String(key)) value = ((value * 33) ^ char.charCodeAt(0)) >>> 0;
+      return value >>> 0;
+    };
+
+    const tableBox = document.getElementById("hash-table");
+    const note = document.getElementById("hash-note");
+    const input = document.getElementById("hash-key");
+
+    const paint = (highlight = -1, message = "") => {
+      tableBox.innerHTML = table.map((chain, slot) => {
+        const active = slot === highlight;
+        const collision = chain.length > 1;
+        return `<div style="display:flex;gap:0.6rem;align-items:center;border:1px solid ${
+          active ? "var(--accent)" : collision ? "var(--warn)" : "var(--rule)"
+        };background:${active ? "var(--warn-bg)" : "var(--paper)"};border-radius:2px;padding:0.25rem 0.5rem;margin:0.15rem 0">
+          <span style="font-family:var(--mono);font-size:0.74rem;color:var(--ink-faint);flex:0 0 1.4rem">${slot}</span>
+          <span style="flex:1">${
+            chain.length
+              ? chain.map((k) => `<code style="font-size:0.74rem;margin-right:0.3rem">'${k}'</code>`).join(
+                  `<span style="color:var(--warn)">→</span> `)
+              : `<span style="color:var(--ink-faint);font-size:0.74rem">empty</span>`
+          }</span>
+          ${collision ? `<span style="font-family:var(--sans);font-size:0.66rem;color:var(--warn)">collision — chain of ${chain.length}</span>` : ""}
+        </div>`;
+      }).join("");
+      note.innerHTML = message || "Insert a few keys. With eight slots, collisions appear quickly — the birthday problem in miniature. Real PHP tables grow and rehash to keep chains short.";
+    };
+
+    const insert = () => {
+      const key = input.value.trim();
+      if (!key) return;
+      const raw = hash(key);
+      const slot = raw % SIZE;
+      const existed = table[slot].length;
+      if (!table[slot].includes(key)) table[slot].push(key);
+      paint(slot,
+        `<code>'${key}'</code> hashes to <code>${raw}</code>. <code>${raw} % ${SIZE} = ${slot}</code>, so it lands in slot ${slot}.` +
+        (existed
+          ? ` That slot was occupied — a <strong>collision</strong>. PHP appends to the chain there and compares real keys on lookup, so correctness is unaffected and only speed suffers.`
+          : ` The slot was free, so lookup here will be a single step.`));
+      input.value = "";
+      input.focus();
+    };
+
+    document.getElementById("hash-add").addEventListener("click", insert);
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") insert(); });
+    document.getElementById("hash-reset").addEventListener("click", () => {
+      table.forEach((chain) => chain.length = 0);
+      paint();
+    });
+
+    ["name", "author", "releaseYear"].forEach((key) => {
+      table[hash(key) % SIZE].push(key);
+    });
+    paint();
+  })();
+</script>

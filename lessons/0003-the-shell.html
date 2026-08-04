@@ -1,0 +1,247 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0003 — The Shell, Properly</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0003</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>The Shell, Properly</h1>
+<p class="subtitle">The shell is a programming language whose data type is "process". Once you see it that way, PATH, pipes, exit codes and environment variables stop being trivia and become one mechanism.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: resolve a command the way bash does</span></div>
+
+<p>Your course gave you four words — terminal, shell, command, process — and drew the line between them correctly. Here is what it costs to actually own that distinction: when you type <code>php -S localhost:8888</code> and press Enter, <strong>eleven distinct things happen</strong> before PHP prints anything. Knowing them is the difference between "it says command not found" being a mystery and being a two-second diagnosis.</p>
+
+<h2>What Enter actually triggers</h2>
+
+<figure>
+<svg viewBox="0 0 600 232" role="img" aria-label="The eleven steps between pressing Enter and a program running">
+  <g class="svg-label">
+    <text x="0" y="14" style="font-weight:650">bash reads the line</text>
+  </g>
+  <text x="0" y="34" class="svg-mono">1  split into words on whitespace</text>
+  <text x="0" y="52" class="svg-mono">2  expand ~ → /home/fgantri</text>
+  <text x="0" y="70" class="svg-mono">3  expand $VARS and $(commands)</text>
+  <text x="0" y="88" class="svg-mono">4  expand globs: *.php → index.php about.php</text>
+  <text x="0" y="106" class="svg-mono">5  strip quotes</text>
+  <text x="0" y="124" class="svg-mono">6  set up redirections (&gt; &lt; |)</text>
+  <text x="0" y="148" class="svg-label" style="font-weight:650">bash resolves the first word</text>
+  <text x="0" y="168" class="svg-mono">7  is it a builtin? (cd, export, echo) → run in-process, done</text>
+  <text x="0" y="186" class="svg-mono">8  else walk $PATH left to right for an executable file</text>
+  <text x="0" y="210" class="svg-label" style="font-weight:650">the kernel takes over</text>
+  <text x="0" y="230" class="svg-mono">9  fork  →  10  exec the binary  →  11  parent waits for exit code</text>
+
+  <line x1="0" y1="20" x2="596" y2="20" class="svg-stroke-faint"/>
+  <line x1="0" y1="134" x2="596" y2="134" class="svg-stroke-faint"/>
+  <line x1="0" y1="196" x2="596" y2="196" class="svg-stroke-faint"/>
+</svg>
+<figcaption>Steps 1–6 are <em>expansion</em>, and they happen before the command has any idea it is being run. This is why <code>rm *</code> is dangerous: the program never sees <code>*</code> — bash already replaced it with every filename, and <code>rm</code> just obeys a very long argument list.</figcaption>
+</figure>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Step 8 is the whole of "command not found"</span>
+  <p><code>PATH</code> is a single string of directories separated by colons. Bash splits it, and tries each directory <strong>in order</strong>, looking for a file with your command's name that has the execute bit set. First match wins; the rest are never consulted.</p>
+  <p>Two things fall out of "first match wins". One: if you have two PHP versions installed, the one earlier in <code>PATH</code> is the one you get, which is the entire mechanism behind version managers like <code>nvm</code> and <code>asdf</code> — they do nothing but reorder <code>PATH</code>. Two: putting <code>.</code> (the current directory) in your <code>PATH</code> is a genuine security hole, because anyone who can drop a file called <code>ls</code> in a directory you visit now runs code as you.</p>
+</div>
+
+<p>Prove the mechanism on your real machine:</p>
+
+<pre><code>echo $PATH | tr ':' '\n'      <span class="c"># the search list, one per line, in order</span>
+which php                     <span class="c"># the first match</span>
+type php                      <span class="c"># same, but tells you if it's a builtin/alias</span>
+type cd                       <span class="c"># "cd is a shell builtin" — no file exists</span>
+type -a php                   <span class="c"># EVERY match, in search order</span>
+command -v php                <span class="c"># the portable, script-safe version</span></code></pre>
+
+<div class="sidenote">Bash caches successful lookups in a hash table, so it doesn't re-walk <code>PATH</code> every time. If you install a new binary and bash insists it's still missing, <code>hash -r</code> clears that cache. This is the answer to a specific, maddening bug that most people solve by opening a new terminal.</div>
+
+<h2>Why <code>cd</code> cannot be a program</h2>
+
+<p>This is the sharpest illustration of the process model from <a href="0001-bytes-programs-processes.html">Lesson 0001</a>, and it is worth being able to explain cold.</p>
+
+<p>Suppose <code>/bin/cd</code> existed. You type <code>cd /tmp</code>. Bash forks, the child execs <code>/bin/cd</code>, the child changes <strong>its own</strong> working directory to <code>/tmp</code>, and then the child exits. Your shell — the parent — never moved. The command would be a no-op with extra steps.</p>
+
+<p>A process cannot change its parent's state. So <code>cd</code> must be executed <em>by the shell itself, in the shell's own process</em>. That is what "builtin" means. The same reasoning makes <code>export</code>, <code>source</code>, <code>exit</code> and <code>alias</code> builtins too.</p>
+
+<div class="callout win">
+  <span class="label">The pattern to carry</span>
+  <p>Whenever you wonder "why can't this program change that thing?", the answer is usually a boundary: process memory, a fork, a network hop, or a security context. Frameworks have exactly the same shape — a middleware can change the request it passes down, but it cannot reach back and change one that already went past.</p>
+</div>
+
+<h2>Practise it — the emulator</h2>
+
+<p>This is a real (small) shell with a real virtual filesystem. Work the task list. Arrow keys recall history; <kbd>Ctrl</kbd>+<kbd>L</kbd> clears.</p>
+
+<div class="widget" data-terminal>
+<script type="application/json">
+{
+  "title": "bash — emulated",
+  "intro": "Emulated bash. Try: help, ls -l, cd, which php, env, echo $PATH | tr, cat /etc/hosts",
+  "tasks": [
+    { "label": "Find out where you are with a single command", "check": { "type": "ran", "match": "^pwd" } },
+    { "label": "List the hidden files in your home directory", "check": { "type": "ran", "match": "^ls .*-.*a" } },
+    { "label": "Navigate into ~/websites/demo", "check": { "type": "cwd", "path": "~/websites/demo" } },
+    { "label": "Discover which php binary would run", "check": { "type": "ran", "match": "^(which|type) +php" } },
+    { "label": "Now list EVERY php on the PATH — there are two", "check": { "type": "ran", "match": "^which +-a +php" } },
+    { "label": "Prove cd is a builtin rather than a file", "check": { "type": "ran", "match": "^type +cd" } },
+    { "label": "Set an environment variable called GREETING", "check": { "type": "env", "name": "GREETING", "match": "." } },
+    { "label": "Read it back with echo, using the $ sigil", "check": { "type": "ran", "match": "echo .*\\$\\{?GREETING" } },
+    { "label": "Create a file by redirecting echo's output into it", "check": { "type": "ran", "match": ">" } },
+    { "label": "Count the lines of notes.txt using a pipe", "check": { "type": "ran", "match": "\\|.*wc" } },
+    { "label": "Show the whole project as a tree", "check": { "type": "ran", "match": "^tree" } }
+  ]
+}
+</script>
+</div>
+
+<h2>Three streams, and why errors don't disappear</h2>
+
+<p>Every process is born with three file descriptors already open — the same numbered table from Lesson 0001:</p>
+
+<div class="table-scroll">
+<table>
+  <thead><tr><th style="width:2.5rem">fd</th><th>Name</th><th>Default</th><th>Redirect with</th></tr></thead>
+  <tbody>
+    <tr><td><code>0</code></td><td>stdin</td><td>your keyboard</td><td><code>&lt; file</code></td></tr>
+    <tr><td><code>1</code></td><td>stdout — <em>results</em></td><td>your screen</td><td><code>&gt; file</code>, <code>&gt;&gt; file</code></td></tr>
+    <tr><td><code>2</code></td><td>stderr — <em>diagnostics</em></td><td>your screen</td><td><code>2&gt; file</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Two separate output streams that both land on your screen by default is a design that confuses everyone once. The point is that they can be <em>separated</em>:</p>
+
+<pre><code>php broken.php &gt; output.txt          <span class="c"># errors still print — they went to fd 2</span>
+php broken.php &gt; output.txt 2&gt;&amp;1     <span class="c"># "make fd 2 go wherever fd 1 goes"</span>
+php broken.php 2&gt; errors.log         <span class="c"># results on screen, errors in a file</span>
+php broken.php 2&gt; /dev/null          <span class="c"># discard errors entirely</span></code></pre>
+
+<p>A pipe connects one process's stdout to the next one's stdin — and <em>only</em> stdout. That is the rule people trip over: <code>grep</code> in a pipeline never sees error messages, because errors travel on fd 2 and the pipe only carries fd 1.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — this is why your Docker and CI logs look the way they do</span>
+  <p>The convention "results on stdout, diagnostics on stderr" is what makes tooling composable. A CLI that prints progress messages to stdout poisons every pipeline it's used in. It's also why containers log to stdout/stderr rather than to files — the orchestrator captures the streams and routes them, which is <a href="https://12factor.net/logs">Twelve-Factor</a> factor XI: treat logs as event streams, never as files you manage.</p>
+</div>
+
+<h2>Exit codes: the return value of a process</h2>
+
+<p>Every process returns a single integer when it dies. <strong>Zero means success.</strong> Anything else means a failure, and the specific number is the program's business.</p>
+
+<pre><code>ls /nonexistent
+echo $?          <span class="c"># 2 — ls's code for "serious trouble"</span>
+
+grep -q php notes.txt
+echo $?          <span class="c"># 0 if found, 1 if not — grep uses the code as its answer</span></code></pre>
+
+<p>Zero-means-success feels backwards until you see why: there is exactly one way to succeed and many distinct ways to fail, so the interesting information is in the non-zero values. <code>&amp;&amp;</code> runs the next command only on zero; <code>||</code> only on non-zero. That is all <code>make</code>, CI pipelines, and every deploy script are built on — and it's why a script that ignores exit codes will happily deploy a build that failed to compile.</p>
+
+<div class="widget" data-quiz data-seed="l3">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "You install PHP 8.4 but <code>php -v</code> still reports 8.1. What is the most likely cause?",
+      "options": [
+        "An older php appears earlier in <code>$PATH</code>",
+        "The new install did not set the execute bit",
+        "The shell needs its alias table rebuilt first",
+        "PHP caches its version between separate runs"
+      ],
+      "answer": 0,
+      "why": "First match in <code>$PATH</code> wins. <code>type -a php</code> lists every match in search order and shows you the imposter immediately. (If <code>type -a</code> shows only the new one and you still get the old, then it's the hash cache — <code>hash -r</code>.)"
+    },
+    {
+      "q": "In <code>php app.php | grep error</code>, what does <code>grep</code> actually receive?",
+      "options": [
+        "Only what PHP wrote to stdout",
+        "Everything PHP wrote to either stream",
+        "Only what PHP wrote to stderr",
+        "Whatever PHP wrote plus its exit code"
+      ],
+      "answer": 0,
+      "why": "A pipe connects fd 1 to fd 0 and nothing else. PHP's warnings and fatal errors go to fd 2 and land on your terminal unfiltered. Use <code>2>&1 |</code> when you want both."
+    },
+    {
+      "q": "Why must <code>cd</code> be implemented inside the shell rather than as a file in <code>/bin</code>?",
+      "options": [
+        "A child cannot change its parent's directory",
+        "Changing directories requires elevated privileges",
+        "The kernel forbids programs from calling chdir",
+        "Path resolution is only available to builtins"
+      ],
+      "answer": 0,
+      "why": "The working directory is per-process. A forked child changing its own cwd and exiting leaves the parent exactly where it was. Same reason <code>export</code> is a builtin: environment variables are per-process too."
+    },
+    {
+      "q": "<code>./deploy.sh</code> returns exit code 1 but the pipeline reports success. What was most likely written?",
+      "options": [
+        "The script's result was never checked",
+        "The script wrote its error to stdout",
+        "Exit code 1 conventionally means success",
+        "Non-zero codes are ignored by default"
+      ],
+      "answer": 0,
+      "why": "Nothing checks exit codes for you. Shell scripts silently continue after a failed command unless you use <code>&&</code>, or set <code>set -e</code> (exit on error), and ideally <code>set -euo pipefail</code> — the three-flag incantation that turns bash from permissive into strict."
+    }
+  ]
+}
+</script>
+</div>
+
+<h2>Quoting — the same idea as PHP's quotes, one layer down</h2>
+
+<p>Your course covered single vs double quotes in PHP: doubles interpolate variables, singles are literal. <strong>Bash has exactly the same rule</strong>, and noticing that it is the same rule is worth more than memorising either one.</p>
+
+<pre><code>name=world
+echo "hello $name"     <span class="c"># hello world  — expanded</span>
+echo 'hello $name'     <span class="c"># hello $name  — literal</span></code></pre>
+
+<p>The general principle underneath both: <strong>a quoting mechanism marks a region as data rather than code.</strong> That is the same sentence that will describe prepared statements in Lesson 0020 and HTML escaping in Lesson 0013. Every injection vulnerability in existence is a failure of this boundary — and you have now met it in three languages before meeting the attack.</p>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Walk through, out loud, everything bash does between you pressing Enter on <code>php -S localhost:8888 &gt; log.txt</code> and PHP starting. Try for at least seven distinct steps.",
+  "answer": "<p>(1) Split the line into words. (2) Expand any <code>~</code>, <code>$VAR</code>, <code>$(...)</code> and globs — none here. (3) Strip quotes. (4) Notice the <code>&gt;</code> redirection and set aside that stdout must go to <code>log.txt</code>. (5) Check whether <code>php</code> is a builtin — it isn't. (6) Walk <code>$PATH</code> left to right for an executable named <code>php</code>; take the first hit. (7) <code>fork()</code> — clone the shell. (8) In the child, open <code>log.txt</code> and point fd 1 at it. (9) <code>exec()</code> the PHP binary, replacing the child's memory but keeping its fds, cwd and environment. (10) The parent blocks in <code>wait()</code>. (11) When PHP exits, its integer code lands in <code>$?</code>.</p><p>The two that people miss: redirection is set up <strong>by the child, before exec</strong>, which is why the program itself needs no idea it is being redirected — and expansion happens <strong>before</strong> the program sees anything, which is why <code>rm *</code> is the shell's doing, not <code>rm</code>'s.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.gnu.org/software/bash/manual/bash.html#Shell-Expansions">The Bash Reference Manual — Shell Expansions</a>. Read section 3.5 specifically; it lists the expansions in the exact order bash performs them, which is information you cannot reliably get from blog posts.
+  <br><br>
+  For a gentler route to the same knowledge, Julia Evans' <a href="https://wizardzines.com/zines/bite-size-command-line/">Bite Size Command Line</a> is excellent and takes about twenty minutes.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0003" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Strong follow-ups: <em>"walk me through what <code>set -euo pipefail</code> each do and why every script should start with it"</em>, or <em>"show me how nvm actually switches node versions"</em> — the answer is pure PATH manipulation and it demystifies a tool you'll use for years.
+  </div>
+
+  <div class="nextprev">
+    <a href="0002-the-filesystem.html">← 0002 — The Filesystem as a Tree</a>
+    <a href="0004-sockets-and-ports.html">0004 — Sockets, Ports, and the Accept Loop →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script src="../assets/terminal.js"></script>

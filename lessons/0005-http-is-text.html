@@ -1,0 +1,207 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0005 — HTTP Is Just Text</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0005</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/http-cheatsheet.html">HTTP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>HTTP Is Just Text</h1>
+<p class="subtitle">A protocol you can type by hand. Once you have done that once, request objects, middleware and REST stop being abstractions and become obvious conveniences.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: speak HTTP with no browser involved</span></div>
+
+<p>In the last lesson you wrote nine lines of text into a socket and a web page came back. This lesson is about those nine lines: their exact grammar, why each part exists, and what your server is entitled to assume.</p>
+
+<h2>The grammar, in full</h2>
+
+<p>A request is: one <strong>request line</strong>, then zero or more <strong>header</strong> lines, then a <strong>blank line</strong>, then an optional <strong>body</strong>. That is the whole specification of the shape.</p>
+
+<pre><code><span class="k">POST</span> /notes?draft=1 <span class="n">HTTP/1.1</span>      <span class="c">← method, target, version</span>
+<span class="n">Host:</span> localhost:8888                <span class="c">← the only mandatory header in HTTP/1.1</span>
+<span class="n">Content-Type:</span> application/x-www-form-urlencoded
+<span class="n">Content-Length:</span> 24
+                                   <span class="c">← blank line. headers are over.</span>
+title=Hello&amp;body=World             <span class="c">← exactly 24 bytes, as promised</span></code></pre>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Three details that cause real bugs</span>
+  <p><strong>Line endings are <code>\r\n</code>, not <code>\n</code>.</strong> Carriage return then line feed, inherited from teletypes. Send bare <code>\n</code> and tolerant servers cope while strict ones reject you. This is why your <code>server.php</code> used <code>"\r\n"</code> everywhere.</p>
+  <p><strong>The blank line is load-bearing.</strong> It is the only thing separating headers from body. Forget it and the server reads your body as a malformed header and hangs waiting for more.</p>
+  <p><strong><code>Content-Length</code> tells the reader when to stop.</strong> TCP is a byte stream with no concept of "message" — it will happily deliver your response in three chunks with pauses between. Without a length (or <code>Transfer-Encoding: chunked</code>), the receiver cannot know whether more is coming. That is precisely the hang you produced by deleting the header last lesson.</p>
+</div>
+
+<h2>Build one and watch it parse</h2>
+
+<p>Change the fields and watch two things move together: the literal bytes on the wire, and the superglobals your PHP code would receive. Those superglobals are <em>derived</em> — PHP parses this text and hands you the pieces.</p>
+
+<div class="widget" data-httplab></div>
+
+<div class="callout win">
+  <span class="label">The thing to notice</span>
+  <p><code>$_GET</code> is not "the GET request". It is <strong>the query string, parsed</strong>. A <code>POST</code> request with <code>?id=17</code> in its URL fills <code>$_GET</code> too. The names are a historical accident and they mislead people for years — the accurate names would be <code>$_QUERY</code> and <code>$_BODY</code>.</p>
+</div>
+
+<h2>Do it for real, with no client library</h2>
+
+<p>Start your <code>server.php</code> from Lesson 0004 in one terminal, then in another:</p>
+
+<pre><code><span class="c"># the polite way</span>
+curl -v http://127.0.0.1:8888/notes?id=17
+
+<span class="c"># the honest way — you are the browser now</span>
+printf 'GET /notes?id=17 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' \
+  | nc 127.0.0.1 8888
+
+<span class="c"># see the response headers only</span>
+curl -sI http://127.0.0.1:8888/</code></pre>
+
+<p>If <code>nc</code> is missing, <code>sudo apt install netcat-openbsd</code>. The <code>printf</code> version is worth doing at least once: there is no library between you and the protocol, and the protocol turns out to be typing.</p>
+
+<h2>Methods: a contract you can break, and shouldn't</h2>
+
+<p>The method is a verb stating your <em>intent</em>. Nothing in the protocol forces a server to honour it — the constraints are promises, and breaking them breaks the rest of the web's assumptions about you.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Method</th><th>Means</th><th>Safe</th><th>Idempotent</th><th>Breaking the promise costs you</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td>Read a resource</td><td>yes</td><td>yes</td><td>Crawlers, prefetchers and caches will "click" it. A <code>GET /delete?id=5</code> gets deleted by Googlebot.</td></tr>
+    <tr><td><code>HEAD</code></td><td>Headers only</td><td>yes</td><td>yes</td><td>Used by monitors to check liveness cheaply.</td></tr>
+    <tr><td><code>POST</code></td><td>Submit; server decides</td><td>no</td><td>no</td><td>Refresh re-submits — the double-charge bug. Fixed with post-redirect-get (Lesson 0023).</td></tr>
+    <tr><td><code>PUT</code></td><td>Replace at this URL</td><td>no</td><td><strong>yes</strong></td><td>Retries after a timeout must be harmless. If yours aren't, it isn't a PUT.</td></tr>
+    <tr><td><code>PATCH</code></td><td>Partial update</td><td>no</td><td>no</td><td>—</td></tr>
+    <tr><td><code>DELETE</code></td><td>Remove</td><td>no</td><td>yes</td><td>Deleting twice should give the same end state, not an error.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<dl>
+  <dt>Safe</dt>
+  <dd>Changes nothing on the server. A caller may issue it freely, and any number of times.</dd>
+  <dt>Idempotent</dt>
+  <dd>Doing it N times leaves the same state as doing it once. This is what makes automatic retry possible — and every load balancer, HTTP client and mobile network retries.</dd>
+</dl>
+
+<div class="callout danger">
+  <span class="label">The classic disaster</span>
+  <p>In 2006 a company built an admin panel where every destructive action was a <code>GET</code> link — <code>/admin/delete?id=5</code>. A well-behaved crawler followed every link on the page, because that is exactly what <code>GET</code> promises is safe to do, and emptied the database. The crawler was correct. The application had lied about its verbs.</p>
+</div>
+
+<h2>Status codes: the first digit is the sentence</h2>
+
+<p>Your course listed the five classes. The distinction that matters most in practice:</p>
+
+<p><strong>4xx means the request was wrong. 5xx means we were wrong.</strong> Get this backwards and your monitoring lies to you — a 200 page reading "not found" will be indexed by search engines, and a 500 for a user's typo will page someone at 3am.</p>
+
+<div class="widget" data-quiz data-seed="l5">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Your browser hangs after loading a page that looks complete. Which server-side mistake fits best?",
+      "options": [
+        "No <code>Content-Length</code> and the socket stayed open",
+        "The status line named an unrecognised status code",
+        "Response headers were sent in the wrong order",
+        "The body used <code>\\n</code> instead of <code>\\r\\n</code>"
+      ],
+      "answer": 0,
+      "why": "Without a length or chunked encoding, the client cannot know the body ended — so it waits for more bytes until it times out. Header order is not significant, and the body's line endings are the body's business."
+    },
+    {
+      "q": "A <code>POST</code> arrives at <code>/notes?draft=1</code> with a form body. Where does <code>draft</code> appear?",
+      "options": [
+        "In <code>$_GET</code>, because it is in the query string",
+        "In <code>$_POST</code>, because the method is POST",
+        "In both, since <code>$_REQUEST</code> merges them",
+        "In neither — a POST discards the query string"
+      ],
+      "answer": 0,
+      "why": "<code>$_GET</code> is fed by the query string regardless of method. The names describe where the data sat in the request, not which verb was used. (<code>$_REQUEST</code> does merge both, which is exactly why it causes ambiguity bugs and is best avoided.)"
+    },
+    {
+      "q": "Which status is correct for a form submission that is well-formed but fails your validation rules?",
+      "options": [
+        "422 — the content cannot be processed",
+        "400 — the request itself was malformed",
+        "500 — the server could not complete it",
+        "403 — the action is not permitted here"
+      ],
+      "answer": 0,
+      "why": "<code>400</code> means the bytes were malformed — bad syntax, unparseable. <code>422</code> means it parsed fine but is semantically invalid, which is exactly what \"email already taken\" is. Laravel returns 422 for failed validation on JSON requests for this reason."
+    },
+    {
+      "q": "nginx returns 502 for your PHP application. What has gone wrong?",
+      "options": [
+        "nginx could not get a valid reply from PHP",
+        "nginx could not find the requested file",
+        "PHP returned a fatal error to the browser",
+        "The upstream connection exceeded its timeout"
+      ],
+      "answer": 0,
+      "why": "<strong>502 Bad Gateway</strong> = the proxy reached upstream but got nonsense or nothing — usually PHP-FPM is down or its socket path is wrong. If it had connected and simply waited too long, that is <strong>504 Gateway Timeout</strong>. Distinguishing them is a genuinely useful production skill, and Lesson 0007 explains the plumbing."
+    }
+  ]
+}
+</script>
+</div>
+
+<h2>Stateless — the constraint everything else works around</h2>
+
+<p>HTTP has no memory. Each request arrives with no knowledge of any previous one. The server cannot tell whether this is your first visit or your thousandth, unless the request itself carries something that says so.</p>
+
+<p>Every "stateful" feature you have ever used is a workaround built on that: cookies attach a value the browser resends, sessions turn that value into a server-side lookup, JWTs sign the state and put it in the client, and caches key off the request because there is nothing else to key off. Lesson 0023 builds all of it.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — statelessness is why the modern stack looks like it does</span>
+  <p>Because every request is self-contained, any server can handle any request. That is what makes horizontal scaling, load balancers, CDNs and edge compute possible at all. <a href="https://developers.cloudflare.com/workers/">Cloudflare</a> can run your code in Frankfurt for one request and Singapore for the next precisely because the protocol promised the second one wouldn't depend on the first.</p>
+  <p>It is also why "sticky sessions" are considered a smell: they reintroduce the dependency the protocol was designed to remove, and every scaling problem afterwards traces back to it.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Write out, from memory, a complete raw HTTP request that posts <code>title=Hi</code> to <code>/notes</code> on <code>localhost:8888</code>. Include every line that must be present. Then say what each header is for.",
+  "answer": "<pre style='margin:0.4rem 0'>POST /notes HTTP/1.1\\r\\nHost: localhost:8888\\r\\nContent-Type: application/x-www-form-urlencoded\\r\\nContent-Length: 8\\r\\n\\r\\ntitle=Hi</pre><p><strong>Host</strong> — mandatory in HTTP/1.1, because one IP serves many sites and the server needs to know which one you want (this is what virtual hosting <em>is</em>). <strong>Content-Type</strong> — tells the server how to parse the body; without it PHP will not populate <code>$_POST</code>. <strong>Content-Length</strong> — tells the server when the body ends. <strong>The blank line</strong> — the boundary between headers and body.</p><p>If you forgot <code>Host</code>, note that its absence is the single most common reason a hand-written request gets a <code>400</code>.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Messages">MDN — HTTP Messages</a> for the shape, and <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status">MDN's status code reference</a> as the page to keep bookmarked for the rest of your career.
+  <br><br>
+  When you want the law rather than the guide: <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9">RFC 9110 §9</a> defines the methods and states the safe/idempotent properties normatively.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0005" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Worth asking: <em>"show me a chunked transfer-encoding response by hand"</em>, <em>"what changed in HTTP/2 and HTTP/3, and does any of it affect how I write PHP?"</em> (short answer: almost none of it, and that's interesting), or <em>"why is 401 called Unauthorized when it means unauthenticated?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0004-sockets-and-ports.html">← 0004 — Sockets, Ports, and the Accept Loop</a>
+    <a href="0006-url-to-pixels.html">0006 — From URL to Pixels →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script src="../assets/httplab.js"></script>

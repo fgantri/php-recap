@@ -1,0 +1,392 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0020 — When Data Becomes Code</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0020</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/security-cheatsheet.html">Security sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>When Data Becomes Code</h1>
+<p class="subtitle">The most important lesson of the weekend. Everything else can be got wrong and fixed later; this one destroys your database or hands over every user record.</p>
+
+<div class="meta"><span>55 minutes</span><span>Win: run the attack, then close it</span></div>
+
+<p>Your course put the principle first and it is the right one: <strong>assume every piece of user input is hostile until you have handled it as such.</strong> Today you are the attacker.</p>
+
+<h2>The lab</h2>
+
+<p>A page shows one note: <code>/note?id=1</code>. The controller does the natural thing — the thing that <em>works</em> — and drops the query-string value straight into the SQL.</p>
+
+<div class="widget" id="inject">
+  <div class="widget-title">
+    <span>Injection lab — you control the query string</span>
+    <span id="inj-db" style="font-weight:400;letter-spacing:0;text-transform:none"></span>
+  </div>
+
+  <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.7rem" class="controls" id="inj-presets"></div>
+
+  <label style="font-family:var(--sans);font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-faint)">
+    /note?id=
+    <input type="text" id="inj-input" value="1" spellcheck="false" style="margin-top:0.2rem">
+  </label>
+
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;margin:0.7rem 0" class="controls">
+    <label style="display:flex;gap:0.35rem;align-items:center;font-family:var(--sans);font-size:0.8rem">
+      <input type="radio" name="inj-mode" value="interp" checked style="width:auto">
+      <span style="color:var(--bad)">interpolated (vulnerable)</span>
+    </label>
+    <label style="display:flex;gap:0.35rem;align-items:center;font-family:var(--sans);font-size:0.8rem">
+      <input type="radio" name="inj-mode" value="prepared" style="width:auto">
+      <span style="color:var(--ok)">prepared (safe)</span>
+    </label>
+    <button type="button" id="inj-run" class="primary">Load the page ▸</button>
+    <button type="button" id="inj-restore">Restore database</button>
+  </div>
+
+  <h4>The SQL that reaches MySQL</h4>
+  <div id="inj-sql"></div>
+  <h4>What the page shows</h4>
+  <div id="inj-out"></div>
+  <p id="inj-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.9rem 0 0"></p>
+</div>
+
+<div class="callout danger">
+  <span class="label">Do the whole sequence before reading on</span>
+  <p>Run <code>1</code>. Then <code>1 OR 1=1</code>. Then <code>1; DROP TABLE users</code>. Then hit <em>Restore database</em>, switch to <strong>prepared</strong>, and run the same three payloads again.</p>
+  <p>That contrast is the entire lesson, and your course was right that it is worth performing rather than reading.</p>
+</div>
+
+<h2>Why it works at all</h2>
+
+<div class="callout foundation">
+  <span class="label">Foundation — The trust boundary was crossed inside your PHP</span>
+  <p>Your SQL is a string. The user's input is a string. When you interpolate one into the other, MySQL receives <strong>one piece of text</strong> and has no way whatsoever to tell which characters you wrote and which a stranger supplied.</p>
+  <p>The database is behaving perfectly. It parses the text it was given and executes the statements it finds. The failure happened in your PHP, before MySQL ever saw anything.</p>
+  <p>This is the identical failure as XSS in <a href="0013-templating-and-escaping.html">Lesson 0013</a>, as command injection, as path traversal in <a href="0002-the-filesystem.html">Lesson 0002</a>, and as the shell quoting in <a href="0003-the-shell.html">Lesson 0003</a>. One shape, five names: <strong>data crossing into a position where it is interpreted as code.</strong></p>
+</div>
+
+<h2>Why separation defeats it</h2>
+
+<p>The fix is not to clean the input. It is to send the query and the values <strong>separately</strong>.</p>
+
+<figure>
+<svg viewBox="0 0 560 152" role="img" aria-label="Interpolation sends one string; prepared statements send structure and values separately">
+  <text x="0" y="12" class="svg-label" style="font-weight:650;fill:var(--bad)">Interpolated — one boat</text>
+  <rect x="0" y="20" width="300" height="30" rx="3" class="svg-box" style="stroke:var(--bad)"/>
+  <text x="10" y="39" class="svg-mono">SELECT … WHERE id = 1; DROP TABLE users</text>
+  <path d="M306 35 L 340 35" class="svg-stroke" marker-end="url(#f)"/>
+  <rect x="344" y="20" width="120" height="30" rx="3" class="svg-box"/>
+  <text x="404" y="39" class="svg-label" text-anchor="middle">MySQL parses</text>
+  <text x="470" y="32" class="svg-small">finds TWO</text>
+  <text x="470" y="44" class="svg-small">statements</text>
+
+  <text x="0" y="82" class="svg-label" style="font-weight:650;fill:var(--ok)">Prepared — two boats</text>
+  <rect x="0" y="90" width="300" height="26" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+  <text x="10" y="107" class="svg-mono">SELECT … WHERE id = ?</text>
+  <path d="M306 103 L 340 103" class="svg-stroke" marker-end="url(#f)"/>
+  <rect x="344" y="90" width="120" height="26" rx="3" class="svg-box"/>
+  <text x="404" y="107" class="svg-label" text-anchor="middle">parsed, planned</text>
+  <text x="470" y="107" class="svg-small">structure fixed</text>
+
+  <rect x="0" y="122" width="300" height="26" rx="3" class="svg-box" style="stroke:var(--link)"/>
+  <text x="10" y="139" class="svg-mono">'1; DROP TABLE users'</text>
+  <path d="M306 135 L 340 135" class="svg-stroke" marker-end="url(#f)"/>
+  <rect x="344" y="122" width="120" height="26" rx="3" class="svg-box"/>
+  <text x="404" y="139" class="svg-label" text-anchor="middle">slotted as a value</text>
+  <text x="470" y="139" class="svg-small">never parsed</text>
+
+  <defs>
+    <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption><code>prepare()</code> sends the template alone. MySQL parses it and <strong>the structure is now fixed and final</strong> — one comparison, one slot. <code>execute()</code> then sends values into those slots as data. They are never parsed as SQL, because parsing already finished.</figcaption>
+</figure>
+
+<p>So a user submitting <code>1; DROP TABLE users</code> causes the database to look for a note whose <code>id</code> equals the literal string <code>1; DROP TABLE users</code>. It finds nothing. It returns an empty result. Nothing is dropped, because there was never a second statement — only a value that happened to contain a semicolon.</p>
+
+<div class="callout win">
+  <span class="label">Why this is categorically stronger than escaping</span>
+  <p>Escaping tries to <em>neutralise dangerous characters</em>, and therefore depends on getting every case right across every character set, every encoding, and every context. It has failed repeatedly and historically — <code>addslashes</code> was defeated by multi-byte character sets in a well-known 2006 attack.</p>
+  <p>Separation removes the <em>possibility</em> that user data is ever interpreted as structure. There is no clever payload, because the payload never reaches a parser. That difference — eliminating a category rather than filtering instances — is what makes a defence trustworthy.</p>
+</div>
+
+<h2>The one real limitation</h2>
+
+<p>Placeholders bind <strong>values</strong>, never <strong>identifiers</strong>. You cannot parameterise a table name, a column name, or a sort direction:</p>
+
+<pre><code><span class="c">// impossible — this is not a value slot</span>
+<span class="n">$db</span>-&gt;query(<span class="s">'SELECT * FROM notes ORDER BY ? ?'</span>, [<span class="n">$column</span>, <span class="n">$direction</span>]);
+
+<span class="c">// correct: an explicit allowlist of things YOU wrote</span>
+<span class="n">$sortable</span> = [<span class="s">'id'</span>, <span class="s">'created_at'</span>, <span class="s">'body'</span>];
+
+<span class="n">$column</span>    = in_array(<span class="n">$_GET</span>[<span class="s">'sort'</span>] ?? <span class="s">''</span>, <span class="n">$sortable</span>, <span class="k">true</span>) ? <span class="n">$_GET</span>[<span class="s">'sort'</span>] : <span class="s">'id'</span>;
+<span class="n">$direction</span> = (<span class="n">$_GET</span>[<span class="s">'dir'</span>] ?? <span class="s">''</span>) === <span class="s">'desc'</span> ? <span class="s">'DESC'</span> : <span class="s">'ASC'</span>;
+
+<span class="n">$db</span>-&gt;query(<span class="s">"SELECT * FROM notes ORDER BY {$column} {$direction}"</span>);</code></pre>
+
+<p>That interpolation is safe because the variables can only ever hold one of a handful of strings <em>you</em> wrote. Note the <code>true</code> third argument to <code>in_array</code> — without it the comparison is loose, and loose comparison in a security check is how allowlists get bypassed.</p>
+
+<p><strong>Never</strong> validate an identifier with a regex like <code>/^[a-z_]+$/</code>. It permits column names that don't exist, leaks schema information through error messages, and grows holes as requirements change. Allowlist the finite set.</p>
+
+<h2>The family, in one table</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Attack</th><th>Data crosses into</th><th>Defence</th><th>The failed defence</th></tr></thead>
+  <tbody>
+    <tr><td>SQL injection</td><td>A database query</td><td>Prepared statements</td><td>Escaping quotes</td></tr>
+    <tr><td>XSS</td><td>HTML output</td><td><code>htmlspecialchars()</code>, per context</td><td>Stripping <code>&lt;script&gt;</code> tags</td></tr>
+    <tr><td>Command injection</td><td>A shell command</td><td><code>escapeshellarg()</code>, or no shell</td><td>Removing semicolons</td></tr>
+    <tr><td>Path traversal</td><td>A filesystem path</td><td><code>realpath()</code> + prefix check</td><td>Stripping <code>..</code></td></tr>
+    <tr><td>Header injection</td><td>HTTP headers</td><td>Reject newlines</td><td>Trimming whitespace</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Read the last column downward. <strong>Every failed defence tries to clean the data. Every working defence separates data from structure.</strong> That is the sentence to leave this lesson with.</p>
+
+<div class="widget" data-quiz data-seed="l20">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "With a prepared statement, a user submits <code>1; DROP TABLE users</code>. What does MySQL do?",
+      "options": [
+        "Looks for a note whose id equals that whole string",
+        "Runs the SELECT and rejects the second statement",
+        "Throws a syntax error because of the semicolon",
+        "Strips the dangerous portion and runs the rest"
+      ],
+      "answer": 0,
+      "why": "The structure was fixed at prepare time — one comparison, one value slot. The whole submission is placed in that slot as data and compared against <code>id</code>. It matches nothing, so an empty result comes back. Nothing was stripped or rejected; there was simply never a second statement."
+    },
+    {
+      "q": "Why is escaping a weaker defence than parameterisation?",
+      "options": [
+        "It filters instances; separation removes the category",
+        "Escaping is measurably slower on large inputs",
+        "Escape functions are unavailable in older PHP",
+        "Escaping cannot handle numeric parameters"
+      ],
+      "answer": 0,
+      "why": "Escaping must correctly anticipate every dangerous character in every charset and context — and it has failed historically, notably against multi-byte charset attacks on <code>addslashes</code>. Separation means user data never reaches a parser at all, so there is no payload to anticipate."
+    },
+    {
+      "q": "You need a user-selectable <code>ORDER BY</code> column. What is correct?",
+      "options": [
+        "Check it against an explicit list of allowed columns",
+        "Bind the column name as a named parameter",
+        "Validate it with a regex allowing only letters",
+        "Escape it with the driver's quoting function"
+      ],
+      "answer": 0,
+      "why": "Placeholders bind values, not identifiers, so binding is impossible. A regex permits non-existent columns and leaks schema detail through errors. An allowlist restricts the value to strings you wrote — and use <code>in_array($x, $list, true)</code>, since loose comparison in a security check is its own bug."
+    },
+    {
+      "q": "Your driver refuses stacked queries, so <code>; DROP TABLE</code> fails. Are you safe?",
+      "options": [
+        "No — <code>OR 1=1</code> needs no semicolon at all",
+        "Yes, since no second statement can execute",
+        "Yes, provided the query is read-only",
+        "No, but only if the user is authenticated"
+      ],
+      "answer": 0,
+      "why": "Single-statement injection is more than enough to dump every user record, bypass a login, or read other accounts' data. <code>1 OR 1=1</code> uses no semicolon. Never take comfort from a driver setting — parameterise."
+    }
+  ]
+}
+</script>
+</div>
+
+<h2>Do it for real</h2>
+
+<p>The lab is a simulation. Reproduce it against your actual MariaDB — the muscle memory of watching a real table vanish is worth ten minutes.</p>
+
+<pre><code>mysql -u root myapp
+CREATE TABLE victims (id INT PRIMARY KEY, name VARCHAR(50));
+INSERT INTO victims VALUES (1,'a'), (2,'b');
+exit</code></pre>
+
+<div class="filename">inject.php</div>
+<pre><code><span class="k">&lt;?php</span>
+<span class="n">$pdo</span> = <span class="k">new</span> PDO(<span class="s">'mysql:host=localhost;dbname=myapp;charset=utf8mb4'</span>, <span class="s">'root'</span>, <span class="s">''</span>, [
+    PDO::ATTR_ERRMODE =&gt; PDO::ERRMODE_EXCEPTION,
+]);
+
+<span class="n">$id</span> = <span class="n">$argv</span>[1] ?? <span class="s">'1'</span>;
+
+<span class="n">$sql</span> = <span class="s">"SELECT * FROM victims WHERE id = $id"</span>;   <span class="c">// VULNERABLE</span>
+echo <span class="s">"SQL: $sql\n"</span>;
+var_dump(<span class="n">$pdo</span>-&gt;query(<span class="n">$sql</span>)-&gt;fetchAll());</code></pre>
+
+<pre><code>php inject.php 1
+php inject.php "1 OR 1=1"          <span class="c"># every row</span>
+php inject.php "1; DROP TABLE victims"
+
+mysql -u root myapp -e 'SELECT * FROM victims;'   <span class="c"># gone?</span></code></pre>
+
+<p>Then rewrite it with <code>prepare</code> / <code>execute</code> and run the same payloads. <strong>Do this on your own machine, on a throwaway table, and nowhere else.</strong> Running these against a system you do not own is a crime in essentially every jurisdiction.</p>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Explain to a junior developer why prepared statements are safe, without using the words \"escape\" or \"sanitise\". Then tell them the one thing placeholders cannot do, and what to use instead.",
+  "answer": "<p><strong>Why they're safe:</strong> the query and its values travel separately. <code>prepare()</code> sends only the SQL template; MySQL parses it and builds an execution plan, and at that moment the <em>structure</em> of the query is final — it knows there is one comparison against <code>id</code> and one slot to fill. <code>execute()</code> then sends the values, which are placed into those slots as data. They are never parsed as SQL, because parsing already happened. A value containing a semicolon is just a value containing a semicolon.</p><p><strong>What placeholders cannot do:</strong> bind identifiers — table names, column names, sort direction. Those are structure, not values, and structure is fixed at prepare time. For those, compare the input against an explicit allowlist of the handful of names you wrote (with strict comparison), and interpolate only a value from that list. Never a regex, and never escaping.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP — SQL Injection Prevention Cheat Sheet</a>. The authoritative treatment, including the identifier-allowlist case above. Injection has been in the <a href="https://owasp.org/www-project-top-ten/">OWASP Top Ten</a> for the entire life of that list — not because it's hard to prevent, but because the vulnerable version is the one that feels natural to write.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0020" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Worth asking: <em>"show me a blind SQL injection — where there's no visible output at all"</em> (the answer involves timing, and it's genuinely clever), or <em>"how would an ORM protect me here, and where does it stop protecting me?"</em> — the answer is raw-expression methods like <code>whereRaw</code>, and it is where real Laravel apps get breached.
+  </div>
+
+  <div class="nextprev">
+    <a href="0019-objects-and-pdo.html">← 0019 — Objects, Classes, PDO</a>
+    <a href="0021-relationships-integrity.html">0021 — Relationships and Integrity →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script src="../assets/sqlplay.js"></script>
+<script>
+  (() => {
+    const { execute, seed } = window.SqlEngine;
+    const state = { db: seed() };
+
+    const input = document.getElementById("inj-input");
+    const sqlBox = document.getElementById("inj-sql");
+    const outBox = document.getElementById("inj-out");
+    const note = document.getElementById("inj-note");
+    const dbBadge = document.getElementById("inj-db");
+
+    const PRESETS = [
+      { label: "normal", value: "1", note: "The ordinary case. It works, and that is exactly the problem — nothing about this tells you anything is wrong." },
+      { label: "OR 1=1", value: "1 OR 1=1", note: "<strong>Every note in the database</strong>, including other users'. <code>1=1</code> is true for every row, so the WHERE clause stopped filtering. No semicolon was needed — this alone is enough to dump a table." },
+      { label: "read another user", value: "1 OR user_id = 2", note: "Targeted: user 2's private notes, including \"Private: salary review\". An attacker who knows your schema does not need to dump everything — they ask for exactly what they want." },
+      { label: "always false + probe", value: "-1 OR admin = 1", note: "This is how an attacker <em>discovers</em> your schema. A different result for a valid column name than an invalid one tells them the column exists. Errors and result counts are both information leaks." },
+      { label: "DROP TABLE", value: "1; DROP TABLE users", note: "<strong>Two statements.</strong> The first fetches a note. The second destroys a table you never intended to touch. Check the table list above — <code>users</code> is gone, and with it every account." },
+      { label: "DELETE rows", value: "1; DELETE FROM notes", note: "Quieter than DROP and harder to notice. The table still exists; it is simply empty. A backup restores it — if you have one, and if anyone notices in time." },
+    ];
+
+    const presets = document.getElementById("inj-presets");
+    for (const preset of PRESETS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = preset.label;
+      button.style.fontSize = "0.72rem";
+      button.addEventListener("click", () => {
+        input.value = preset.value;
+        run(preset.note);
+      });
+      presets.append(button);
+    }
+
+    const mode = () => document.querySelector('input[name="inj-mode"]:checked').value;
+
+    const escapeHtml = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const renderRows = (columns, rows) => {
+      if (!rows.length) {
+        return `<div style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-faint);padding:0.4rem 0">
+          Nothing found — the page would render an empty note (or 404).</div>`;
+      }
+      return `<div class="table-scroll" style="max-width:none;margin:0.3rem 0"><table style="margin:0">
+        <thead><tr>${columns.map((c) => `<th>${c}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map((r) => `<tr>${columns.map((c) =>
+          `<td><code>${r[c] === null || r[c] === undefined ? "NULL" : escapeHtml(String(r[c]))}</code></td>`).join("")}</tr>`).join("")}
+        </tbody></table></div>`;
+    };
+
+    const badge = () => {
+      const tables = Object.keys(state.db);
+      dbBadge.innerHTML = tables.length
+        ? `<span style="color:var(--ink-faint);font-size:0.72rem">tables: ${tables.map((t) =>
+            `${t} (${state.db[t].rows.length})`).join(", ")}</span>`
+        : `<span style="color:var(--bad);font-size:0.72rem">database empty</span>`;
+    };
+
+    const run = (presetNote) => {
+      const raw = input.value;
+      const safe = mode() === "prepared";
+
+      const sql = safe
+        ? "SELECT * FROM notes WHERE id = ?"
+        : `SELECT * FROM notes WHERE id = ${raw}`;
+
+      sqlBox.innerHTML = `<div class="term-shell" style="height:auto;padding:0.6rem 0.75rem">${
+        safe
+          ? `<span class="ok">${escapeHtml(sql)}</span>\n<span class="dim">   ↳ bound value: </span><span class="cmd">'${escapeHtml(raw)}'</span><span class="dim">  (sent separately, never parsed)</span>`
+          : `<span class="err">${escapeHtml(sql)}</span>\n<span class="dim">   ↳ one string. MySQL cannot tell your text from theirs.</span>`
+      }</div>`;
+
+      try {
+        if (safe) {
+          /* The bound value is compared as data — exactly what a real prepared
+             statement does. A payload can never become structure. */
+          const rows = state.db.notes
+            ? state.db.notes.rows.filter((row) => String(row.id) === String(raw))
+            : [];
+          outBox.innerHTML = renderRows(
+            state.db.notes ? state.db.notes.columns : [], rows);
+          note.innerHTML = presetNote
+            ? `${presetNote}<br><br><strong style="color:var(--ok)">Prepared: harmless.</strong> The entire payload was compared against <code>id</code> as a single literal value. It matched nothing, so nothing happened — no rows leaked, no tables dropped.`
+            : `<strong style="color:var(--ok)">Prepared: harmless.</strong> Whatever you typed was treated as one value, compared against <code>id</code>, and never parsed as SQL.`;
+        } else {
+          const results = execute(state.db, sql);
+          outBox.innerHTML = results.map((r) =>
+            r.kind === "rows"
+              ? renderRows(r.columns, r.rows)
+              : `<div style="border-left:3px solid var(--bad);background:var(--bad-bg);padding:0.5rem 0.7rem;
+                  margin:0.3rem 0;font-family:var(--sans);font-size:0.82rem;color:var(--bad)">
+                  <code style="font-size:0.74rem">${escapeHtml(r.statement)}</code><br>${r.message}</div>`
+          ).join("");
+          note.innerHTML = presetNote || `Compare what you asked for with what came back. If they differ, you changed the meaning of someone else's query.`;
+        }
+      } catch (error) {
+        outBox.innerHTML = `<div style="border-left:3px solid var(--bad);background:var(--bad-bg);padding:0.5rem 0.7rem;
+          font-family:var(--mono);font-size:0.78rem;color:var(--bad)">ERROR: ${escapeHtml(error.message)}</div>`;
+        note.innerHTML = `An error message is itself a leak — it tells an attacker about your schema. This is why <code>display_errors</code> must be off in production.`;
+      }
+      badge();
+    };
+
+    document.getElementById("inj-run").addEventListener("click", () => run());
+    document.getElementById("inj-restore").addEventListener("click", () => {
+      state.db = seed();
+      note.innerHTML = `Database restored. In production there is no button for this — only a backup, if you have one.`;
+      badge();
+      outBox.innerHTML = "";
+    });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+    document.querySelectorAll('input[name="inj-mode"]').forEach((radio) =>
+      radio.addEventListener("change", () => run()));
+
+    run();
+  })();
+</script>

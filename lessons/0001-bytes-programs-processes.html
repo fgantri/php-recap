@@ -1,0 +1,266 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0001 — Bytes, Programs, Processes</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0001</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Bytes, Programs, Processes</h1>
+<p class="subtitle">A file is just bytes. Something has to be willing to run them — and which something, decides everything about how you work.</p>
+
+<div class="meta"><span>30 minutes</span><span>Win: why <code>.php</code> needs no build step</span></div>
+
+<p>Your course opened with a claim worth taking apart: <em>"A file on disk is a sequence of bytes. It becomes a program only when something is willing to execute those bytes."</em> That is exactly right, and it is doing more work than it appears to.</p>
+
+<p>Open a real terminal and look at some bytes:</p>
+
+<pre><code>cd ~ &amp;&amp; mkdir -p websites/demo &amp;&amp; cd websites/demo
+echo '&lt;?php echo "hi\n";' &gt; hi.php
+
+<span class="c"># the bytes of your PHP file</span>
+xxd hi.php | head -2
+
+<span class="c"># the bytes of the program that runs it</span>
+xxd $(which php) | head -2</code></pre>
+
+<p>The first is readable text. The second begins <code>7f 45 4c 46</code> — hex for <code>\x7fELF</code>, the magic number that tells Linux "this is an executable". Both are files. Both are bytes. Only one of them can be handed to the CPU.</p>
+
+<div class="sidenote">Every file format announces itself in its first few bytes. <code>ELF</code> for Linux executables, <code>MZ</code> for Windows <code>.exe</code>, <code>%PDF</code>, <code>&lt;?xml</code>, <code>PK</code> for zip (and therefore <code>.docx</code>, <code>.jar</code>, <code>.xlsx</code>). The <code>file</code> command does nothing but read those and consult a table.</div>
+
+<h2>Two ways to make bytes run — and the third one nobody mentions</h2>
+
+<p>Your course notes give the standard pair: <strong>compiled</strong> and <strong>interpreted</strong>. That division is useful and slightly false, and the falseness is where PHP actually lives.</p>
+
+<figure>
+<svg viewBox="0 0 620 250" role="img" aria-label="Three execution models: ahead-of-time compilation, bytecode VM, and JIT">
+  <text x="0" y="14" class="svg-label" style="font-weight:650">1 · Ahead-of-time compiled — C, Rust, Go</text>
+  <rect x="0" y="24" width="96" height="30" rx="3" class="svg-box"/>
+  <text x="48" y="43" class="svg-mono" text-anchor="middle">main.c</text>
+  <path d="M100 39 L128 39" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="132" y="24" width="96" height="30" rx="3" class="svg-box"/>
+  <text x="180" y="43" class="svg-label" text-anchor="middle">compiler</text>
+  <path d="M232 39 L260 39" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="264" y="24" width="110" height="30" rx="3" class="svg-box"/>
+  <text x="319" y="43" class="svg-mono" text-anchor="middle">./main (ELF)</text>
+  <path d="M378 39 L406 39" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="410" y="24" width="80" height="30" rx="3" class="svg-box"/>
+  <text x="450" y="43" class="svg-label" text-anchor="middle">CPU</text>
+  <text x="500" y="43" class="svg-small">build step; ships a binary</text>
+
+  <text x="0" y="98" class="svg-label" style="font-weight:650">2 · Bytecode VM — PHP, Python, Java, C#</text>
+  <rect x="0" y="108" width="96" height="30" rx="3" class="svg-box"/>
+  <text x="48" y="127" class="svg-mono" text-anchor="middle">index.php</text>
+  <path d="M100 123 L128 123" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="132" y="108" width="96" height="30" rx="3" class="svg-box"/>
+  <text x="180" y="127" class="svg-label" text-anchor="middle">compiler</text>
+  <path d="M232 123 L260 123" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="264" y="108" width="110" height="30" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="319" y="127" class="svg-mono" text-anchor="middle">opcodes</text>
+  <path d="M378 123 L406 123" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="410" y="108" width="80" height="30" rx="3" class="svg-box"/>
+  <text x="450" y="127" class="svg-label" text-anchor="middle">VM</text>
+  <path d="M494 123 L516 123" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="520" y="108" width="56" height="30" rx="3" class="svg-box"/>
+  <text x="548" y="127" class="svg-label" text-anchor="middle">CPU</text>
+  <text x="264" y="152" class="svg-small">in memory, discarded — unless OPcache keeps them</text>
+
+  <text x="0" y="192" class="svg-label" style="font-weight:650">3 · JIT — JavaScript in V8, PHP 8's optional JIT</text>
+  <rect x="0" y="202" width="96" height="30" rx="3" class="svg-box"/>
+  <text x="48" y="221" class="svg-mono" text-anchor="middle">app.js</text>
+  <path d="M100 217 L128 217" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="132" y="202" width="242" height="30" rx="3" class="svg-box"/>
+  <text x="253" y="221" class="svg-label" text-anchor="middle">interpret, watch what's hot, recompile it</text>
+  <path d="M378 217 L406 217" class="svg-stroke" marker-end="url(#a)"/>
+  <rect x="410" y="202" width="80" height="30" rx="3" class="svg-box"/>
+  <text x="450" y="221" class="svg-label" text-anchor="middle">CPU</text>
+  <text x="500" y="221" class="svg-small">fast paths, at a warm-up cost</text>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>PHP is row 2. Your <code>.php</code> file <em>is</em> compiled — every request — into an array of opcodes that a virtual machine then executes. What it never does is produce a file on disk you could ship. That single fact is why editing a <code>.php</code> file takes effect on the next refresh with no build step.</figcaption>
+</figure>
+
+<div class="callout foundation">
+  <span class="label">Foundation — "Interpreted" is a claim about packaging, not about speed</span>
+  <p>People say "PHP is slow because it's interpreted." Both halves are shaky. PHP compiles to bytecode exactly like Java does; the difference is that Java writes <code>.class</code> files and PHP keeps its opcodes in memory. And since PHP 5.5, <span class="term">OPcache</span> caches those opcodes between requests, so the compile step usually happens <em>once per file per deploy</em>, not once per request.</p>
+  <p>The useful distinction is not compiled/interpreted. It is: <strong>is there an artefact between my source and the thing that runs?</strong> If yes, you have a build step, a deploy pipeline, and a gap where source and running code can disagree. If no, the file on disk <em>is</em> the program.</p>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — this is the whole reason Vite exists</span>
+  <p>PHP's "no artefact" property is exactly what modern JavaScript lost. Browsers can't run TypeScript, JSX, or <code>.vue</code> files, so a build step must produce something they can. Every front-end build tool you've heard of — webpack, Rollup, esbuild, <a href="https://vite.dev/guide/why">Vite</a>, Turbopack — exists to make that unavoidable artefact-producing step fast enough to feel like it isn't there.</p>
+  <p>Vite's trick, worth knowing now because it will make sense of a lot later: during development it <em>doesn't</em> bundle. It serves your modules to the browser individually over HTTP and lets the browser's own module loader assemble them — which is to say, it works hard to recover the immediacy PHP has for free.</p>
+</div>
+
+<h2>What a process actually is</h2>
+
+<p>"Run the program" is vague. What the operating system does is create a <span class="term">process</span>: an isolated container with its own everything.</p>
+
+<figure>
+<svg viewBox="0 0 560 216" role="img" aria-label="Anatomy of a process: memory regions, file descriptors, and attributes">
+  <rect x="0" y="8" width="250" height="200" rx="4" class="svg-box"/>
+  <text x="12" y="28" class="svg-label" style="font-weight:650">Its own memory</text>
+  <rect x="12" y="38" width="226" height="26" rx="2" class="svg-box"/>
+  <text x="20" y="55" class="svg-mono">text — the code itself</text>
+  <rect x="12" y="68" width="226" height="26" rx="2" class="svg-box"/>
+  <text x="20" y="85" class="svg-mono">data — globals, constants</text>
+  <rect x="12" y="98" width="226" height="40" rx="2" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="20" y="115" class="svg-mono">heap — grows up →</text>
+  <text x="20" y="130" class="svg-small">your arrays, objects, strings</text>
+  <rect x="12" y="142" width="226" height="40" rx="2" class="svg-box" style="stroke:var(--link)"/>
+  <text x="20" y="159" class="svg-mono">stack — grows down ←</text>
+  <text x="20" y="174" class="svg-small">one frame per function call</text>
+  <text x="12" y="200" class="svg-small">no other process can read any of this</text>
+
+  <rect x="270" y="8" width="140" height="200" rx="4" class="svg-box"/>
+  <text x="282" y="28" class="svg-label" style="font-weight:650">File descriptors</text>
+  <text x="282" y="48" class="svg-mono">0 stdin</text>
+  <text x="282" y="66" class="svg-mono">1 stdout</text>
+  <text x="282" y="84" class="svg-mono">2 stderr</text>
+  <text x="282" y="106" class="svg-mono">3 hi.php</text>
+  <text x="282" y="124" class="svg-mono">4 socket:8888</text>
+  <text x="282" y="150" class="svg-small">just integers indexing</text>
+  <text x="282" y="163" class="svg-small">a table the kernel keeps</text>
+  <text x="282" y="184" class="svg-small">"everything is a file"</text>
+  <text x="282" y="197" class="svg-small">means everything is one</text>
+
+  <rect x="430" y="8" width="130" height="200" rx="4" class="svg-box"/>
+  <text x="442" y="28" class="svg-label" style="font-weight:650">Attributes</text>
+  <text x="442" y="48" class="svg-mono">PID 4127</text>
+  <text x="442" y="66" class="svg-mono">PPID 4102</text>
+  <text x="442" y="84" class="svg-mono">uid fgantri</text>
+  <text x="442" y="102" class="svg-mono">cwd ~/demo</text>
+  <text x="442" y="120" class="svg-mono">env PATH=…</text>
+  <text x="442" y="146" class="svg-small">a child gets a</text>
+  <text x="442" y="159" class="svg-small">copy of env and</text>
+  <text x="442" y="172" class="svg-small">cwd at birth —</text>
+  <text x="442" y="185" class="svg-small">a copy, never</text>
+  <text x="442" y="198" class="svg-small">a shared link</text>
+</svg>
+<figcaption>Three things every process owns. Four of these boxes come back later this weekend: the <strong>stack</strong> in Lesson 0012 (stack traces), <strong>file descriptors</strong> in Lesson 0004 (a socket is one), <strong>env</strong> in Lesson 0003 and again in 0022 (config), and <strong>cwd</strong> in Lesson 0002 (relative paths).</figcaption>
+</figure>
+
+<p>Look at a real one. Every process on Linux is a directory under <code>/proc</code>:</p>
+
+<pre><code><span class="c"># start something long-lived, in the background</span>
+php -S localhost:8888 &amp;
+
+<span class="c"># the shell prints its PID; use it here</span>
+ls -l /proc/$!/fd          <span class="c"># its open file descriptors</span>
+cat /proc/$!/environ | tr '\0' '\n' | head   <span class="c"># its environment</span>
+ls -l /proc/$!/cwd         <span class="c"># its current directory</span>
+
+kill %1                    <span class="c"># stop it again</span></code></pre>
+
+<p>Those are not metaphors or teaching abstractions. That is the kernel's actual bookkeeping, exposed as files.</p>
+
+<div class="callout foundation">
+  <span class="label">Foundation — <code>fork</code> and <code>exec</code>, the only two moves</span>
+  <p>Unix creates processes with a pair of calls that feel strange until they click. <code>fork()</code> <strong>clones</strong> the current process — same code, same memory, same open files — producing a near-identical child. <code>exec()</code> then <strong>replaces</strong> that child's entire memory with a different program, keeping its PID and its open file descriptors.</p>
+  <p>Every command you type does this: bash forks itself, and the child execs <code>/usr/bin/php</code>. That is why a child inherits your environment variables and working directory — it literally began as a copy of you. And it is why a child <em>cannot</em> change yours: <code>exec</code> replaced its memory, not yours. Lesson 0003 shows why that makes <code>cd</code> impossible to implement as a normal program.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l1">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "You edit a <code>.php</code> file on a live server and refresh. The change appears immediately. What best explains it?",
+      "options": [
+        "No build artefact exists, so the source file is the program",
+        "PHP skips compiling and reads the source line by line",
+        "The server watches the file and restarts the process",
+        "The browser cache was bypassed by the refresh action"
+      ],
+      "answer": 0,
+      "why": "PHP does compile — to opcodes, in memory, on each request (or once, with OPcache). The reason there is no deploy step is that no artefact ever sits between your source and the running program. Note the second option is the popular explanation and is simply wrong."
+    },
+    {
+      "q": "A child process changes its own working directory and exits. What is the parent's cwd afterwards?",
+      "options": [
+        "Unchanged, because the child received a copy",
+        "Changed, because children and parents share it",
+        "Unchanged, but only if the child exited cleanly",
+        "Changed, but reverted when the child exited"
+      ],
+      "answer": 0,
+      "why": "A child gets a copy of the parent's cwd and environment at fork time. Nothing about it is shared afterwards. This one fact explains why <code>cd</code> must be a shell builtin rather than a program in <code>/bin</code>."
+    },
+    {
+      "q": "Which of these is genuinely NOT true of PHP's execution model?",
+      "options": [
+        "It produces a standalone binary you can distribute",
+        "It compiles your source into an array of opcodes",
+        "It can cache those opcodes between separate requests",
+        "It runs those opcodes on a virtual machine, not the CPU"
+      ],
+      "answer": 0,
+      "why": "PHP never emits a distributable binary — that is the defining difference from C or Go. The other three are all accurate descriptions of the Zend Engine: compile to opcodes, optionally cache with OPcache, execute on the VM."
+    }
+  ]
+}
+</script>
+</div>
+
+<h2>The consequence that shapes all of PHP</h2>
+
+<p>Because each request runs in a process that is created, does its work, and is destroyed, PHP has what is called a <span class="term">shared-nothing</span> architecture. No variable survives a request. No object stays in memory. Every request starts from absolute zero.</p>
+
+<p>This sounds like a limitation. It is the reason PHP scaled across the entire 1990s and 2000s web: a crashed request cannot poison the next one, a memory leak cannot accumulate, and you scale by adding more processes without coordinating anything. It also explains, entirely, why sessions and caches exist — they are the workarounds for a language that deliberately forgets.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — the same idea, renamed and sold back</span>
+  <p>Node.js took the opposite bet: one long-lived process handling many requests, sharing memory between them. Faster, and now <em>you</em> own the leaks and the cross-request contamination.</p>
+  <p>Then serverless arrived — AWS Lambda, Vercel Functions, <a href="https://developers.cloudflare.com/workers/">Cloudflare Workers</a> — and its central promise is: your handler runs, responds, and is torn down; state must live elsewhere. That is shared-nothing, exactly, rediscovered as a billing model. PHP developers have been writing serverless functions since 1995 without the word.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Without looking: what are the three things a process owns, and what specifically does a child process inherit from its parent?",
+  "answer": "<p><strong>Owns:</strong> (1) its own memory — text, data, heap, stack; (2) a table of file descriptors, where 0/1/2 are stdin/stdout/stderr and everything else is an open file, pipe or socket; (3) attributes — PID, parent PID, owning user, current working directory, environment variables.</p><p><strong>Inherits at fork:</strong> a <em>copy</em> of the environment, the working directory, and the open file descriptors. Copies, not links — which is why a child can never change its parent's environment or directory.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.php.net/manual/en/internals2.opcodes.php">PHP Manual — Opcodes</a>, and the <a href="https://www.php.net/manual/en/book.opcache.php">OPcache book</a>. Skim both for ten minutes; you do not need to memorise any opcode, you need to see that the list <em>exists</em> and that your source becomes entries in it.
+  <br><br>
+  For processes, Julia Evans' <a href="https://wizardzines.com/">zines</a> on the Linux process model are the friendliest accurate treatment anywhere.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0001" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Good follow-ups here: <em>"show me the actual opcodes for a small PHP file"</em> (there's a tool for it), <em>"what does OPcache do on a deploy and why does it sometimes serve stale code?"</em>, or <em>"how does PHP-FPM reuse processes if PHP is shared-nothing?"</em> — that last one is genuinely subtle and Lesson 0007 depends on it.
+  </div>
+
+  <div class="nextprev">
+    <a href="../START-HERE.html">← Syllabus</a>
+    <a href="0002-the-filesystem.html">0002 — The Filesystem as a Tree →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

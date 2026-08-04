@@ -1,0 +1,229 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 1 — An HTTP Server From Raw Sockets</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · Milestone project</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Project 1</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/http-cheatsheet.html">HTTP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>An HTTP Server From Raw Sockets</h1>
+<p class="subtitle">No framework, no library, no <code>php -S</code>. Roughly 150 lines that accept TCP connections, parse HTTP by hand, and serve a real directory to a real browser.</p>
+
+<div class="meta"><span>~2 hours</span><span>Uses lessons 0001–0007</span><span>Portfolio piece</span></div>
+
+<p>This is the project that proves Friday landed. Anyone can install a web server; being able to <em>write</em> one — and explain why it's structured that way — is the thing that reads as depth on a GitHub profile.</p>
+
+<h2>Set up the repository</h2>
+
+<p>One repo for the whole weekend, growing across four milestones and tagged at each. Put it on the Linux filesystem, not <code>/mnt/c</code> — WSL is dramatically faster there and file permissions actually work.</p>
+
+<pre><code>mkdir -p ~/websites/lowlevel-web &amp;&amp; cd ~/websites/lowlevel-web
+git init -b main
+git config user.name  "Fouad Gantri"
+git config user.email "gantri.fouad@gmail.com"
+
+mkdir -p 01-http-server/public
+printf 'vendor/\n*.log\n.env\n' &gt; .gitignore</code></pre>
+
+<div class="callout warn">
+  <span class="label">Before you write any code</span>
+  <p>Two things worth doing once, now: put a real <code>README.md</code> at the repo root explaining what this repository is and what each numbered directory contains, and commit at every working step rather than once at the end. A recruiter reading your history should see the shape of your thinking, not one commit called "done".</p>
+</div>
+
+<h2>What you are building</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:2rem"></th><th>Requirement</th><th>Lesson it comes from</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Listen on a configurable host and port; exit with a clear message if <code>bind()</code> fails</td><td>0004</td></tr>
+    <tr><td>2</td><td>Accept connections in a loop, one at a time, and never crash on a malformed request</td><td>0004</td></tr>
+    <tr><td>3</td><td>Parse the request line into method, target and version; parse headers into an array</td><td>0005</td></tr>
+    <tr><td>4</td><td>Split the target into path and query string; decode <code>%20</code>-style escapes</td><td>0005, 0006</td></tr>
+    <tr><td>5</td><td>Map the path to a file under a document root, and serve it with the right <code>Content-Type</code></td><td>0002, 0007</td></tr>
+    <tr><td>6</td><td>Serve <code>index.html</code> when the path names a directory</td><td>0007</td></tr>
+    <tr><td>7</td><td><strong>Refuse to serve anything outside the document root</strong></td><td>0002</td></tr>
+    <tr><td>8</td><td>Return 404 with a real HTML body for missing files, and 405 for methods you don't support</td><td>0005</td></tr>
+    <tr><td>9</td><td>Support <code>HEAD</code> — identical headers to <code>GET</code>, no body</td><td>0005</td></tr>
+    <tr><td>10</td><td>Log one line per request: method, path, status, bytes, duration in ms</td><td>0003</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>The skeleton</h2>
+
+<p>Enough to get you moving; the rest is yours. Type it, don't paste it.</p>
+
+<div class="filename">01-http-server/server.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+<span class="n">$host</span> = <span class="n">$argv</span>[1] ?? <span class="s">'127.0.0.1'</span>;
+<span class="n">$port</span> = (int) (<span class="n">$argv</span>[2] ?? 8888);
+<span class="n">$root</span> = realpath(__DIR__ . <span class="s">'/public'</span>);
+
+<span class="n">$server</span> = @stream_socket_server(<span class="s">"tcp://$host:$port"</span>, <span class="n">$errno</span>, <span class="n">$errstr</span>);
+
+<span class="k">if</span> (! <span class="n">$server</span>) {
+    fwrite(STDERR, <span class="s">"Cannot bind $host:$port — $errstr ($errno)\n"</span>);
+    exit(1);                        <span class="c">// non-zero: the shell must know we failed</span>
+}
+
+fwrite(STDOUT, <span class="s">"Serving $root on http://$host:$port\n"</span>);
+
+<span class="k">while</span> (<span class="n">$conn</span> = @stream_socket_accept(<span class="n">$server</span>, -1)) {
+    <span class="n">$started</span> = microtime(<span class="k">true</span>);
+
+    <span class="n">$request</span>  = readRequest(<span class="n">$conn</span>);
+    <span class="n">$response</span> = handle(<span class="n">$request</span>, <span class="n">$root</span>);
+
+    sendResponse(<span class="n">$conn</span>, <span class="n">$response</span>, <span class="n">$request</span>[<span class="s">'method'</span>] === <span class="s">'HEAD'</span>);
+    fclose(<span class="n">$conn</span>);
+
+    logLine(<span class="n">$request</span>, <span class="n">$response</span>, microtime(<span class="k">true</span>) - <span class="n">$started</span>);
+}</code></pre>
+
+<p>Write <code>readRequest</code>, <code>handle</code>, <code>sendResponse</code> and <code>logLine</code> yourself. Some guidance on the two that have traps in them:</p>
+
+<h3><code>readRequest</code> — where malformed input arrives</h3>
+
+<p>Read up to the blank line, then split on <code>\r\n</code>. The first line gives you method, target and version. Every line after it is <code>Name: value</code>. Two things will bite you:</p>
+
+<ul>
+  <li>A header value may itself contain a colon (<code>Host: localhost:8888</code>). Split on the <strong>first</strong> colon only.</li>
+  <li>A client can disconnect mid-request, or send nonsense. Return a structure that says "malformed" and answer <code>400</code> rather than letting PHP emit a warning into your response body.</li>
+</ul>
+
+<h3><code>handle</code> — where the security bug lives</h3>
+
+<p>This is the part that matters most. The naive version:</p>
+
+<pre><code><span class="c">// DO NOT SHIP THIS</span>
+<span class="n">$file</span> = <span class="n">$root</span> . <span class="n">$path</span>;
+<span class="k">if</span> (file_exists(<span class="n">$file</span>)) { <span class="k">return</span> file_get_contents(<span class="n">$file</span>); }</code></pre>
+
+<p>Request <code>/../../../../etc/passwd</code> and you have handed over the machine's user list. Worse, if this were your notes app you would be handing over <code>.env</code>.</p>
+
+<div class="callout danger">
+  <span class="label">The correct defence — resolve, then verify</span>
+  <p>Do not sanitise the input by stripping <code>..</code>. That is defeated by <code>%2e%2e</code>, by <code>....//</code>, by encoded slashes, and by symlinks. Instead, let the filesystem resolve the path completely and then check where it landed:</p>
+  <pre style="margin:0.6rem 0"><code>$candidate = realpath($root . '/' . ltrim($path, '/'));
+
+if ($candidate === false || ! str_starts_with($candidate, $root . DIRECTORY_SEPARATOR)) {
+    return notFound();     // outside the root — treat as missing, don't explain
+}</code></pre>
+  <p><code>realpath()</code> resolves <code>..</code>, <code>.</code> and symlinks and returns the true absolute path, or <code>false</code> if nothing is there. Comparing the <em>result</em> to the root is the check — and note the trailing separator, without which a sibling directory named <code>public-backup</code> would pass.</p>
+  <p>Answer <code>404</code>, not <code>403</code>. Telling an attacker "that exists but you may not have it" is free information, and Lesson 0022 returns to exactly this trade-off.</p>
+</div>
+
+<h3>MIME types</h3>
+
+<p>The browser needs to be told what it is receiving. Get this wrong and CSS arrives as plain text and is ignored — silently, with no error anywhere. Map by extension, and default to <code>application/octet-stream</code>:</p>
+
+<pre><code><span class="n">$types</span> = [
+    <span class="s">'html'</span> =&gt; <span class="s">'text/html; charset=utf-8'</span>,
+    <span class="s">'css'</span>  =&gt; <span class="s">'text/css'</span>,
+    <span class="s">'js'</span>   =&gt; <span class="s">'text/javascript'</span>,
+    <span class="s">'json'</span> =&gt; <span class="s">'application/json'</span>,
+    <span class="s">'png'</span>  =&gt; <span class="s">'image/png'</span>,
+    <span class="s">'jpg'</span>  =&gt; <span class="s">'image/jpeg'</span>,
+    <span class="s">'svg'</span>  =&gt; <span class="s">'image/svg+xml'</span>,
+];</code></pre>
+
+<div class="sidenote">Always send <code>charset=utf-8</code> on text types. Without it browsers guess, and guessing wrongly is how you get <code>â€”</code> where an em-dash should be. This is the same class of bug as MySQL's <code>utf8</code> vs <code>utf8mb4</code>, which Lesson 0019 covers.</div>
+
+<h2>Acceptance tests</h2>
+
+<p>Put some files in <code>public/</code> — an <code>index.html</code>, a stylesheet, an image — then work down this list. Every one should behave as stated before you tag the milestone.</p>
+
+<pre><code>php server.php &amp;                                  <span class="c"># start it</span>
+
+curl -i http://127.0.0.1:8888/                    <span class="c"># 200, text/html</span>
+curl -i http://127.0.0.1:8888/style.css           <span class="c"># 200, text/css</span>
+curl -i http://127.0.0.1:8888/nope.html           <span class="c"># 404 + an HTML body</span>
+curl -I http://127.0.0.1:8888/                    <span class="c"># HEAD: headers only, no body</span>
+curl -i -X DELETE http://127.0.0.1:8888/          <span class="c"># 405, with an Allow header</span>
+curl -i 'http://127.0.0.1:8888/?a=1&amp;b=2'          <span class="c"># query ignored for routing</span>
+curl -i --path-as-is http://127.0.0.1:8888/../../../etc/passwd   <span class="c"># 404, NOT the file</span>
+curl -i http://127.0.0.1:8888/%2e%2e/%2e%2e/etc/passwd           <span class="c"># 404 as well</span>
+
+<span class="c"># and the honest one — no client library at all</span>
+printf 'GET / HTTP/1.1\r\nHost: x\r\n\r\n' | nc 127.0.0.1 8888</code></pre>
+
+<div class="callout warn">
+  <span class="label"><code>--path-as-is</code> matters</span>
+  <p>Without that flag, curl helpfully normalises <code>../</code> out of the URL <em>before</em> sending it, so your server never sees the attack and you conclude you are safe. You are testing curl, not your code. The <code>%2e%2e</code> variant is the one a real attacker sends anyway — percent-encoded, so no intermediary normalises it.</p>
+</div>
+
+<h2>Commit and tag</h2>
+
+<pre><code>git add .
+git commit -m "Add HTTP/1.1 server built on raw TCP sockets
+
+Parses requests by hand, serves static files with MIME detection,
+and rejects path traversal by resolving with realpath and verifying
+the result stays under the document root."
+
+git tag -a m1-http-server -m "Milestone 1: HTTP server from raw sockets"</code></pre>
+
+<p>Then publish it — this is the point of the exercise:</p>
+
+<pre><code>gh repo create lowlevel-web --public --source=. --remote=origin \
+  --description "Building the web stack from raw sockets upward, in PHP"
+git push -u origin main --tags</code></pre>
+
+<div class="callout win">
+  <span class="label">Then bring it to me for review</span>
+  <p>Say <strong>"review project 1"</strong> and I will read the code properly — correctness, the traversal defence specifically, error handling, naming, and structure. Expect real notes rather than praise; that is what makes the review worth having.</p>
+  <p>I will look hardest at: whether a malformed request can crash the loop, whether the traversal check has a hole, whether <code>Content-Length</code> is always right (it must count <em>bytes</em>, not characters — <code>strlen</code>, never <code>mb_strlen</code>), and whether <code>HEAD</code> genuinely matches <code>GET</code>'s headers.</p>
+</div>
+
+<h2>Stretch goals</h2>
+
+<p>Only if you have time and appetite. Each one is a real feature of real servers, and each maps onto something you'll meet later.</p>
+
+<div class="grid two">
+  <div class="card">
+    <h4>Keep-alive</h4>
+    <p>Honour <code>Connection: keep-alive</code>: loop reading further requests on the same connection instead of closing. You'll need to read exactly <code>Content-Length</code> bytes and not one more. This is the optimisation HTTP/1.1 was built around.</p>
+  </div>
+  <div class="card">
+    <h4>Fork per connection</h4>
+    <p><code>pcntl_fork()</code> after <code>accept()</code>, handle in the child, exit. Suddenly a <code>sleep(5)</code> in one request stops blocking the others. About ten lines, and it makes the worker-pool idea from Lesson 0004 concrete.</p>
+  </div>
+  <div class="card">
+    <h4>Conditional requests</h4>
+    <p>Send <code>Last-Modified</code>; when a request carries <code>If-Modified-Since</code> and the file hasn't changed, reply <code>304</code> with no body. You have implemented HTTP caching — the mechanism behind every CDN.</p>
+  </div>
+  <div class="card">
+    <h4>Directory listing</h4>
+    <p>When a directory has no <code>index.html</code>, generate a listing. Then escape the filenames with <code>htmlspecialchars()</code> — a file named <code>&lt;script&gt;.txt</code> is a live XSS vector, and Lesson 0013 explains exactly why.</p>
+  </div>
+</div>
+
+<div class="ask">
+  <strong>Stuck is expected.</strong> Ask me anything — <em>"my Content-Length is off by one"</em>, <em>"why does Chrome hang but curl works"</em>, <em>"is my traversal check actually safe?"</em>. That last one is worth asking even if you're confident; it is exactly the kind of code where confidence and correctness come apart.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="P1" type="button">Mark this project complete</button>
+
+  <div class="nextprev">
+    <a href="../lessons/0007-server-vs-runtime.html">← 0007 — Web Server vs Application Runtime</a>
+    <a href="../lessons/0008-how-php-runs.html">0008 — How PHP Actually Runs a File →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

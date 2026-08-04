@@ -1,0 +1,279 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0010 — Truth, Comparison, Coercion</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0010</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Truth, Comparison, Coercion</h1>
+<p class="subtitle">Every conditional in every program reduces to a boolean. What PHP does on the way there has caused more production bugs than any other feature of the language.</p>
+
+<div class="meta"><span>40 minutes</span><span>Win: predict any comparison without running it</span></div>
+
+<p>Your course gave the rule and it is the right one: <strong>default to <code>===</code></strong>. This lesson is about earning that rule — because "just always use three equals" is advice you'll eventually have to break, and you need to know when.</p>
+
+<h2>Falsy, exhaustively</h2>
+
+<p>These eight values are falsy. Everything else in PHP is truthy. There is no ninth.</p>
+
+<div class="grid three">
+  <div class="card"><code>false</code></div>
+  <div class="card"><code>0</code></div>
+  <div class="card"><code>0.0</code></div>
+  <div class="card"><code>-0.0</code></div>
+  <div class="card"><code>''</code></div>
+  <div class="card"><code>'0'</code></div>
+  <div class="card"><code>[]</code></div>
+  <div class="card"><code>null</code></div>
+</div>
+
+<p>The two that catch people: <code>'0'</code> — the one-character string — is falsy, while <code>'0.0'</code>, <code>'false'</code>, <code>' '</code> and <code>'00'</code> are all truthy. And <code>-1</code> is truthy, because falsiness is about <em>zero</em>, not about <em>negativity</em>.</p>
+
+<div class="callout danger">
+  <span class="label">The bug this produces, in real code</span>
+  <pre style="margin:0.6rem 0"><code>$quantity = $_POST['quantity'];   // the user typed 0
+
+if (! $quantity) {
+    abort('Please enter a quantity');   // fires for a legitimate 0
+}</code></pre>
+  <p>Same shape with a search term of <code>"0"</code>, a house number of <code>0</code>, a score of <code>0</code>, or a page offset of <code>0</code>. The fix is to say what you mean: <code>if ($quantity === '')</code> for "they left it blank", or <code>if (! is_numeric($quantity))</code> for "that isn't a number". <strong>Truthiness is a shortcut, and shortcuts encode assumptions.</strong></p>
+</div>
+
+<h2>Predict the comparison</h2>
+
+<p>Retrieval practice, not reading. Predict each result before revealing it — getting one wrong and being surprised is worth more than getting it right.</p>
+
+<div class="widget" id="cmp">
+  <div class="widget-title">
+    <span>Loose vs strict</span>
+    <span id="cmp-score" style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink-faint)"></span>
+  </div>
+  <div id="cmp-rows"></div>
+  <button type="button" id="cmp-reset" style="margin-top:0.9rem">Start over</button>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — PHP 8 fixed the worst of it</span>
+  <p>Before PHP 8, <code>0 == 'foo'</code> was <strong>true</strong>. The rule was "if one side is a number, convert the other to a number", and <code>'foo'</code> converted to <code>0</code>. This meant a password check written as <code>$hash == 0</code> could pass, and it was a genuine source of authentication bypasses.</p>
+  <p>PHP 8 changed the rule: when comparing a number to a <em>non-numeric</em> string, the number is converted to a string instead. So <code>0 == 'foo'</code> is now false, and <code>0 == '0'</code> is still true because <code>'0'</code> is numeric.</p>
+  <p>Two lessons. First, if you read a pre-2020 PHP article about <code>==</code>, its examples may simply be wrong now. Second — and more useful — <strong>the fact that a language's comparison semantics needed a breaking change to become safe is itself the argument for <code>===</code>.</strong></p>
+</div>
+
+<h2>When <code>==</code> is actually correct</h2>
+
+<p>Rules you can't break are rules you don't understand. Loose comparison is right when you have consciously decided that a type difference is not meaningful:</p>
+
+<pre><code><span class="c">// Everything from HTTP is a string. This id came from a URL.</span>
+<span class="k">if</span> (<span class="n">$note</span>[<span class="s">'user_id'</span>] === <span class="n">$_GET</span>[<span class="s">'user'</span>]) { }   <span class="c">// always false! int vs string</span>
+
+<span class="c">// Correct: convert deliberately, then compare strictly.</span>
+<span class="k">if</span> (<span class="n">$note</span>[<span class="s">'user_id'</span>] === (int) <span class="n">$_GET</span>[<span class="s">'user'</span>]) { }</code></pre>
+
+<div class="callout warn">
+  <span class="label">This exact bug is waiting for you in Lesson 0022</span>
+  <p>Your course's Chapter 14 writes <code>if ($note['user_id'] !== $currentUserId)</code>. With PDO's default settings on MySQL, <strong>integer columns come back as strings</strong> — so <code>'1' !== 1</code> is true, and the authorization check rejects the rightful owner. Or worse, written the other way round, it lets everyone through.</p>
+  <p>Two real fixes: cast at the boundary, or set <code>PDO::ATTR_EMULATE_PREPARES => false</code> so the driver returns native types. Lesson 0019 configures PDO properly for exactly this reason. Remember this when you get there.</p>
+</div>
+
+<h2>The null-handling operators</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Operator</th><th>Reads as</th><th>Fires when the left side is</th></tr></thead>
+  <tbody>
+    <tr><td><code>$a ?: $b</code></td><td>Elvis — "or else"</td><td><strong>falsy</strong> — including <code>0</code> and <code>''</code>. Warns if undefined.</td></tr>
+    <tr><td><code>$a ?? $b</code></td><td>Null coalescing</td><td><strong>null or undefined</strong>. Never warns. Usually what you want.</td></tr>
+    <tr><td><code>$a ??= $b</code></td><td>Assign if not set</td><td>Same as above, assigning in place.</td></tr>
+    <tr><td><code>$a?-&gt;b()</code></td><td>Nullsafe call</td><td>Returns <code>null</code> instead of erroring when <code>$a</code> is null.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The distinction is the falsy trap again: <code>$_GET['page'] ?: 1</code> turns a legitimate page <code>0</code> into <code>1</code>, while <code>$_GET['page'] ?? 1</code> only supplies the default when the key is genuinely absent. <strong>Reach for <code>??</code> by default.</strong></p>
+
+<div class="widget" data-quiz data-seed="l10">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "A search form submits <code>q=0</code>. <code>if (! $_GET['q'])</code> shows \"please enter a search term\". Why?",
+      "options": [
+        "The string <code>'0'</code> is falsy in PHP",
+        "The value arrives as integer zero, not a string",
+        "Empty query parameters are dropped by PHP",
+        "The negation operator coerces to integer first"
+      ],
+      "answer": 0,
+      "why": "<code>'0'</code> is one of the eight falsy values, and it arrives as a string from HTTP. Use <code>$_GET['q'] === ''</code> to test for blank, or <code>!isset(...)</code> for absent — say which condition you actually mean."
+    },
+    {
+      "q": "In PHP 8, what is the result of <code>0 == 'foo'</code>?",
+      "options": [
+        "false — the number becomes a string",
+        "true — the string becomes zero",
+        "true — both sides are falsy values",
+        "A TypeError, since the types differ"
+      ],
+      "answer": 0,
+      "why": "PHP 8 reversed the conversion direction for non-numeric strings: <code>0</code> becomes <code>'0'</code>, and <code>'0' == 'foo'</code> is false. Before PHP 8 this was true, which caused real authentication bypasses."
+    },
+    {
+      "q": "<code>$page = $_GET['page'] ?: 1;</code> — when does this behave wrongly?",
+      "options": [
+        "When the user genuinely requests page 0",
+        "When the key is missing from the query string",
+        "When the value contains non-numeric characters",
+        "When the query string has duplicate keys"
+      ],
+      "answer": 0,
+      "why": "<code>?:</code> tests falsiness, and <code>'0'</code> is falsy, so page 0 silently becomes page 1. <code>??</code> tests only null-or-undefined and would pass the <code>'0'</code> through — which is why <code>??</code> is the better default."
+    },
+    {
+      "q": "<code>$note['user_id']</code> is <code>'1'</code> from PDO and <code>$currentUserId</code> is <code>1</code>. What does <code>!==</code> return?",
+      "options": [
+        "true — the types differ, so they are not identical",
+        "false — the values are equal after coercion",
+        "true — string comparison is done character by character",
+        "false — numeric strings are treated as integers"
+      ],
+      "answer": 0,
+      "why": "<code>!==</code> compares type as well as value, so <code>'1' !== 1</code> is true — and an ownership check written this way rejects the legitimate owner. Cast at the boundary, or disable emulated prepares so PDO returns real integers."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "List all eight falsy values in PHP. Then explain, in one sentence, why <code>??</code> is a better default than <code>?:</code> for supplying defaults from user input.",
+  "answer": "<p><code>false</code>, <code>0</code>, <code>0.0</code>, <code>-0.0</code>, <code>''</code> (empty string), <code>'0'</code> (the string zero), <code>[]</code> (empty array), <code>null</code>. Everything else — including <code>'0.0'</code>, <code>'false'</code>, <code>' '</code>, <code>-1</code> and <code>[0]</code> — is truthy.</p><p><strong><code>??</code> vs <code>?:</code>:</strong> <code>?:</code> replaces anything falsy, so legitimate zero-ish input (page 0, quantity 0, search term \"0\") gets silently overwritten by your default; <code>??</code> replaces only null or undefined, which is the condition you actually meant when you said \"if they didn't give me one\".</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.php.net/manual/en/language.types.type-juggling.php">PHP Manual — Type Juggling</a>, and the <a href="https://www.php.net/manual/en/types.comparisons.php">comparison tables appendix</a>, which is the authoritative grid of every loose and strict comparison in the language. Bookmark the second one; nobody memorises it, and nobody needs to.
+  <br><br>
+  The PHP 8 change is documented in the <a href="https://wiki.php.net/rfc/string_to_number_comparison">Saner string to number comparisons RFC</a> — worth reading once to see how a language fixes a decade-old mistake without breaking everything.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0010" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Worth asking: <em>"show me a real authentication bypass that relied on <code>==</code>"</em> (the <code>md5</code> magic-hash trick is a great story), or <em>"what does <code>in_array($x, $arr)</code> do without the third argument?"</em> — the answer involves loose comparison and it surprises everyone.
+  </div>
+
+  <div class="nextprev">
+    <a href="0009-variables-and-memory.html">← 0009 — Variables, Types, Memory</a>
+    <a href="0011-arrays-are-hashmaps.html">0011 — Arrays Are Hash Maps →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const ROWS = [
+      { expr: "0 == 'foo'", loose: false, strict: false, why: "PHP 8 converts the number to a string here. Before PHP 8 this was <strong>true</strong> and caused authentication bypasses." },
+      { expr: "'1' == 1", loose: true, strict: false, why: "The classic. Numeric string and integer are loosely equal — and this is exactly the PDO ownership-check trap." },
+      { expr: "'abc' == 0", loose: false, strict: false, why: "False since PHP 8. True before it. If a tutorial says otherwise, it predates 2020." },
+      { expr: "null == false", loose: true, strict: false, why: "Both are falsy, so loose comparison agrees. Strict sees null and bool — different types." },
+      { expr: "'' == null", loose: true, strict: false, why: "Both falsy. This is why <code>== null</code> is a poor test for absence; use <code>=== null</code> or <code>is_null()</code>." },
+      { expr: "'0' == false", loose: true, strict: false, why: "The string zero is falsy, so it compares equal to false. This is the trap behind empty-search-term bugs." },
+      { expr: "'10' == '1e1'", loose: true, strict: false, why: "<strong>Two strings</strong>, but both look numeric — so PHP compares them as numbers, and 1e1 is 10. Genuinely surprising." },
+      { expr: "100 == '1e2'", loose: true, strict: false, why: "Scientific notation in a string is still numeric. Relevant when validating input that came from a form." },
+      { expr: "[] == false", loose: true, strict: false, why: "An empty array is falsy. This is what makes <code>if ($books)</code> read as \"if there are any books\"." },
+      { expr: "'abc' == 'abc'", loose: true, strict: true, why: "Same type, same value. The one case where loose and strict always agree." },
+    ];
+
+    const container = document.getElementById("cmp-rows");
+    const scoreBox = document.getElementById("cmp-score");
+    const state = { answered: 0, right: 0 };
+
+    const paint = () => {
+      scoreBox.textContent = state.answered
+        ? `${state.right} of ${state.answered} predicted correctly`
+        : `${ROWS.length} to predict`;
+    };
+
+    const build = () => {
+      state.answered = 0;
+      state.right = 0;
+      container.textContent = "";
+
+      for (const row of ROWS) {
+        const line = document.createElement("div");
+        line.style.cssText = "display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;padding:0.4rem 0;border-bottom:1px solid var(--rule-soft)";
+
+        const expr = document.createElement("code");
+        expr.textContent = row.expr;
+        expr.style.cssText = "flex:0 0 9.5rem;font-size:0.8rem";
+
+        const controls = document.createElement("div");
+        controls.style.cssText = "display:flex;gap:0.35rem";
+
+        const verdict = document.createElement("span");
+        verdict.style.cssText = "font-family:var(--sans);font-size:0.74rem;color:var(--ink-faint)";
+
+        const why = document.createElement("div");
+        why.style.cssText = "flex:1 0 100%;font-size:0.76rem;line-height:1.5;color:var(--ink-soft);padding-left:0.2rem";
+        why.hidden = true;
+
+        for (const guess of [true, false]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = guess ? "true" : "false";
+          button.style.cssText = "font-family:var(--mono);padding:0.2rem 0.6rem";
+          button.addEventListener("click", () => {
+            if (controls.dataset.locked) return;
+            controls.dataset.locked = "1";
+
+            const correct = guess === row.loose;
+            state.answered += 1;
+            state.right += correct ? 1 : 0;
+
+            [...controls.children].forEach((other) => {
+              other.disabled = true;
+              const isAnswer = (other.textContent === "true") === row.loose;
+              if (isAnswer) other.style.cssText += ";background:var(--ok-bg);border-color:var(--ok);color:var(--ok)";
+              else if (other === button) other.style.cssText += ";background:var(--bad-bg);border-color:var(--bad);color:var(--bad)";
+              else other.style.opacity = "0.45";
+            });
+
+            verdict.innerHTML = `<code>===</code> is <strong style="color:${row.strict ? "var(--ok)" : "var(--bad)"}">${row.strict}</strong>`;
+            why.innerHTML = row.why;
+            why.hidden = false;
+            paint();
+          });
+          controls.append(button);
+        }
+
+        line.append(expr, controls, verdict, why);
+        container.append(line);
+      }
+      paint();
+    };
+
+    document.getElementById("cmp-reset").addEventListener("click", build);
+    build();
+  })();
+</script>

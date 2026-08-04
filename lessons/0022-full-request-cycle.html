@@ -1,0 +1,268 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0022 — The Full Request Cycle</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0022</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/security-cheatsheet.html">Security sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>The Full Request Cycle</h1>
+<p class="subtitle">Every piece is now in place. Assembling them reveals the loop you will perform for the rest of your career — and one vulnerability that looks identical to working code.</p>
+
+<div class="meta"><span>45 minutes</span><span>Win: 404 vs 403, and why it's a judgement call</span></div>
+
+<h2>The loop</h2>
+
+<figure>
+<svg viewBox="0 0 580 128" role="img" aria-label="The request cycle from route registration through response">
+  <rect x="0" y="30" width="82" height="34" rx="3" class="svg-box"/>
+  <text x="41" y="45" class="svg-label" text-anchor="middle">route</text>
+  <text x="41" y="58" class="svg-small" text-anchor="middle">registered</text>
+
+  <rect x="96" y="30" width="82" height="34" rx="3" class="svg-box"/>
+  <text x="137" y="45" class="svg-label" text-anchor="middle">front</text>
+  <text x="137" y="58" class="svg-small" text-anchor="middle">controller</text>
+
+  <rect x="192" y="30" width="96" height="34" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="240" y="45" class="svg-label" text-anchor="middle">controller</text>
+  <text x="240" y="58" class="svg-small" text-anchor="middle">decides</text>
+
+  <rect x="302" y="30" width="82" height="34" rx="3" class="svg-box"/>
+  <text x="343" y="45" class="svg-label" text-anchor="middle">model</text>
+  <text x="343" y="58" class="svg-small" text-anchor="middle">the data</text>
+
+  <rect x="398" y="30" width="82" height="34" rx="3" class="svg-box"/>
+  <text x="439" y="45" class="svg-label" text-anchor="middle">view</text>
+  <text x="439" y="58" class="svg-small" text-anchor="middle">renders</text>
+
+  <rect x="494" y="30" width="82" height="34" rx="3" class="svg-box"/>
+  <text x="535" y="45" class="svg-label" text-anchor="middle">response</text>
+  <text x="535" y="58" class="svg-small" text-anchor="middle">+ status</text>
+
+  <path d="M84 47 L 92 47" class="svg-stroke" marker-end="url(#h)"/>
+  <path d="M180 47 L 188 47" class="svg-stroke" marker-end="url(#h)"/>
+  <path d="M290 47 L 298 47" class="svg-stroke" marker-end="url(#h)"/>
+  <path d="M386 47 L 394 47" class="svg-stroke" marker-end="url(#h)"/>
+  <path d="M482 47 L 490 47" class="svg-stroke" marker-end="url(#h)"/>
+
+  <text x="192" y="88" class="svg-small">exists? allowed? what should happen?</text>
+  <text x="192" y="100" class="svg-small">this box is where your judgement lives —</text>
+  <text x="192" y="112" class="svg-small">everything else is plumbing</text>
+
+  <defs>
+    <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption><strong>Register a route → write a controller → write a view.</strong> That rhythm is identical in Laravel, Symfony, Rails, Django and Express. The syntax differs; the shape does not.</figcaption>
+</figure>
+
+<p>This is roughly <span class="term">MVC</span>. The <strong>Model</strong> layer is the piece your course did not formalise — right now raw arrays from the database play that role, and in a framework a <code>Note</code> class would.</p>
+
+<h2>The vulnerability that looks like working code</h2>
+
+<p>Here is the controller as your course first wrote it. It works. Every test passes. Ship it.</p>
+
+<pre><code><span class="n">$note</span> = <span class="n">$db</span>-&gt;query(<span class="s">'SELECT * FROM notes WHERE id = :id'</span>, [
+    <span class="s">'id'</span> =&gt; <span class="n">$_GET</span>[<span class="s">'id'</span>],
+])-&gt;fetch();
+
+<span class="k">require</span> <span class="s">'views/note.view.php'</span>;</code></pre>
+
+<p>Change the number in the address bar and you are reading somebody else's notes.</p>
+
+<div class="callout danger">
+  <span class="label">IDOR — Insecure Direct Object Reference</span>
+  <p>The application exposes a database id in the URL and does not verify the requester is entitled to the object behind it. Change the number, see other people's data.</p>
+  <p>It is one of the most common vulnerabilities in real applications, <strong>precisely because the working version and the broken version look nearly identical.</strong> The query is parameterised. There is no injection. Nothing in a code review jumps out — unless you are specifically asking "who is allowed to see this?"</p>
+  <p>The fix is <em>never</em> to obscure or hash the id. The fix is to check ownership on every single request.</p>
+</div>
+
+<h2>Authentication vs authorization</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><strong>Authentication</strong></td><td><em>Who are you?</em></td><td>Login, sessions, tokens, password verification</td><td><code>401</code></td></tr>
+    <tr><td><strong>Authorization</strong></td><td><em>Are you allowed to do this?</em></td><td>Ownership, roles, permissions</td><td><code>403</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Separate concerns, both required. A correctly authenticated user is still not entitled to everything. (And note <code>401</code> is misnamed — it means <em>unauthenticated</em>. The naming has confused people since 1997.)</p>
+
+<h2>Two approaches, and why the second is better</h2>
+
+<h3>Filter in the query</h3>
+
+<pre><code><span class="n">$note</span> = <span class="n">$db</span>-&gt;query(
+    <span class="s">'SELECT * FROM notes WHERE user_id = :uid AND id = :id'</span>,
+    [<span class="s">'uid'</span> =&gt; <span class="n">$currentUserId</span>, <span class="s">'id'</span> =&gt; <span class="n">$_GET</span>[<span class="s">'id'</span>]]
+)-&gt;fetch();
+
+<span class="k">if</span> (! <span class="n">$note</span>) { abort(404); }</code></pre>
+
+<p>Secure, and it conflates two different situations: <em>this note doesn't exist</em> and <em>this note exists but isn't yours</em> both become 404. For debugging, logging and API consumers, that difference matters.</p>
+
+<h3>Separate the checks</h3>
+
+<pre><code><span class="n">$note</span> = <span class="n">$db</span>-&gt;query(<span class="s">'SELECT * FROM notes WHERE id = :id'</span>, [
+    <span class="s">'id'</span> =&gt; <span class="n">$_GET</span>[<span class="s">'id'</span>],
+])-&gt;fetch();
+
+<span class="k">if</span> (! <span class="n">$note</span>) {
+    abort(Response::NOT_FOUND);                       <span class="c">// doesn't exist</span>
+}
+
+<span class="k">if</span> ((<span class="k">int</span>) <span class="n">$note</span>[<span class="s">'user_id'</span>] !== <span class="n">$currentUserId</span>) {
+    abort(Response::FORBIDDEN);                       <span class="c">// exists, not yours</span>
+}</code></pre>
+
+<div class="callout warn">
+  <span class="label">Note the <code>(int)</code> cast — this is the Lesson 0019 trap</span>
+  <p>With PDO emulating prepares, <code>$note['user_id']</code> is the <em>string</em> <code>'1'</code>, so <code>'1' !== 1</code> is true and the rightful owner gets a 403. Either set <code>ATTR_EMULATE_PREPARES => false</code> on the connection, or cast at the boundary as above. Do not use <code>!=</code> to dodge it — a loose comparison in a security check is how allowlists get bypassed.</p>
+</div>
+
+<h2>404 or 403? The honest complication</h2>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Correct is not always a single answer</span>
+  <p>There is a real argument on the other side. Returning <code>403</code> tells an attacker that a note with that id <strong>exists</strong>. Iterate the ids and you can map the size and shape of the dataset without reading a single record.</p>
+  <p>Which is right depends on what you are protecting:</p>
+  <p><strong>403</strong> when existence is not sensitive — a notes app, a blog admin. It is clearer, better for debugging, and more honest to API consumers.</p>
+  <p><strong>404 for both</strong> when the mere existence of a record is sensitive — medical records, private repositories, HR files, anything where "there is a file about this person" is itself the leak. Log the distinction internally so you can still debug.</p>
+  <p>GitHub does exactly this: a private repository you cannot access returns 404, not 403.</p>
+  <p><strong>This is worth internalising as a pattern of thinking, not a rule to memorise.</strong> Knowing that a trade-off exists — and being able to name what it trades — is what lets you make it deliberately rather than by accident. That is the difference between following advice and having judgement.</p>
+</div>
+
+<h2>Magic numbers</h2>
+
+<p>The finished controller contains <code>1</code> and <code>403</code>. Both are <span class="term">magic numbers</span> — bare literals whose significance is implicit. You know today that <code>1</code> means "the current user". In six months, to a colleague, or in a codebase running five years, it is a number.</p>
+
+<div class="grid two">
+  <div class="card">
+    <h4>For the user id — a variable</h4>
+    <pre style="margin:0;font-size:0.72rem"><code>$currentUserId = 1;
+// …
+if ((int) $note['user_id'] !== $currentUserId)</code></pre>
+    <p style="font-size:0.78rem;margin:0.5rem 0 0">This deliberately breaks the "inline single-use variables" guideline. The name is doing all the work. Knowing when a guideline does not apply is more valuable than following it.</p>
+  </div>
+  <div class="card">
+    <h4>For the status — a constant</h4>
+    <pre style="margin:0;font-size:0.72rem"><code>final class Response
+{
+    const NOT_FOUND   = 404;
+    const FORBIDDEN   = 403;
+    const UNAUTHORIZED = 401;
+}</code></pre>
+    <p style="font-size:0.78rem;margin:0.5rem 0 0">You will abort with these in many places; a local variable in each would be silly. When a name must be available everywhere, make one place for it.</p>
+  </div>
+</div>
+
+<p><code>abort(403)</code> became <code>abort(Response::FORBIDDEN)</code>. The behaviour is byte-for-byte identical. All that changed is that a reader no longer needs outside knowledge. <strong>That is what most of programming looks like</strong> — not grand redesigns, but a long accumulation of small changes, each making something slightly clearer.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — what frameworks add here</span>
+  <p><strong>Laravel: policies and gates.</strong> <code>$this->authorize('view', $note)</code> calls a <code>NotePolicy::view()</code> method. Same check, moved somewhere reusable and testable.</p>
+  <p><strong>Symfony: voters.</strong> <code>#[IsGranted('VIEW', subject: 'note')]</code> — an attribute on the controller, with the logic in a voter class.</p>
+  <p><strong>Both:</strong> route–model binding turns <code>/notes/{note}</code> into an already-fetched <code>Note</code> object, and a missing one 404s before your controller runs.</p>
+  <p>The value is not that the check gets shorter. It is that it moves somewhere it can be <strong>tested in isolation and applied consistently</strong> — because an authorization check that exists in seventeen controllers is an authorization check that is missing from one of them.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l22">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "A user changes <code>/note?id=5</code> to <code>id=6</code> and reads someone else's note. What is the correct fix?",
+      "options": [
+        "Verify ownership before rendering, on every request",
+        "Replace sequential ids with random UUIDs",
+        "Encrypt the id parameter in the query string",
+        "Move the id from the query string into a POST body"
+      ],
+      "answer": 0,
+      "why": "IDOR is fixed by checking authorization, never by hiding the identifier. UUIDs and encryption are security through obscurity — an attacker who obtains one valid id still gets the data, and ids leak through logs, referrers and shared links."
+    },
+    {
+      "q": "A user requests a note that exists but belongs to someone else. Which is defensible?",
+      "options": [
+        "Either 403 or 404, depending on the threat model",
+        "403 always, because it is the accurate answer",
+        "404 always, since disclosure is never acceptable",
+        "401, because they are not authorised for it"
+      ],
+      "answer": 0,
+      "why": "403 is more accurate and better for debugging. 404 leaks nothing about existence, which matters when existence itself is sensitive — GitHub returns 404 for private repos. Recognising it as a trade-off, and naming what it trades, is the actual skill. (401 is wrong either way: they are authenticated.)"
+    },
+    {
+      "q": "Your ownership check uses <code>!==</code> and rejects the legitimate owner. What should you fix?",
+      "options": [
+        "Cast to int, or disable emulated prepares",
+        "Switch the comparison to loose <code>!=</code>",
+        "Compare the values as strings on both sides",
+        "Store the user id in the session as a string"
+      ],
+      "answer": 0,
+      "why": "PDO with emulated prepares returns every column as a string. Fix the type at the boundary — cast, or set <code>ATTR_EMULATE_PREPARES => false</code>. Switching to <code>!=</code> would work today and quietly weaken a security-critical comparison."
+    },
+    {
+      "q": "Why do frameworks move authorization into policies or voters?",
+      "options": [
+        "So it can be tested once and applied consistently",
+        "Because controllers cannot access the session",
+        "To reduce the number of database queries needed",
+        "Because inline checks cannot return 403 correctly"
+      ],
+      "answer": 0,
+      "why": "A check duplicated across seventeen controllers is a check missing from one of them. Extracting it gives one authoritative implementation, testable in isolation and impossible to forget when the framework applies it declaratively."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Write the finished single-note controller from memory and read it back as prose. Then explain the 404-versus-403 decision to someone who thinks there is one right answer.",
+  "answer": "<p><strong>The controller:</strong> fetch the note whose id matches the query-string parameter, bound rather than interpolated. If there is none, abort with not found. If there is one but its <code>user_id</code> (cast to int) is not the current user's, abort with forbidden. Only if it exists <em>and</em> belongs to the current user does execution continue to the view.</p><p><strong>The 404/403 decision:</strong> 403 is the accurate answer — the resource was found, you are simply not permitted it — and it is clearer for debugging and for API consumers. But 403 confirms the record <em>exists</em>, so an attacker can enumerate ids to map your dataset without reading anything. When existence itself is sensitive — medical records, private repositories, HR files — return 404 for both cases and log the distinction internally. The right answer depends on the threat model, and the skill is being able to say what you are trading rather than reciting a rule.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html">OWASP — IDOR Prevention Cheat Sheet</a>, and <a href="https://owasp.org/Top10/A01_2021-Broken_Access_Control/">Broken Access Control</a>, which has been number <em>one</em> in the OWASP Top Ten since 2021 — ahead of injection.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0022" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask: <em>"show me what a Laravel policy for this looks like side by side with my hand-written check"</em> — seeing them adjacent is the fastest way to make the framework version legible rather than magical.
+  </div>
+
+  <div class="nextprev">
+    <a href="0021-relationships-integrity.html">← 0021 — Relationships and Integrity</a>
+    <a href="0023-state-sessions-csrf.html">0023 — State: Cookies, Sessions, POST, CSRF →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

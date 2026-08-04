@@ -1,0 +1,172 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Reference</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">HTTP</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="glossary.html">Glossary</a>
+    <a href="#" onclick="window.print();return false">Print</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>HTTP Cheat Sheet</h1>
+<p class="subtitle">The protocol, on two printed pages.</p>
+
+<h2>Anatomy of a URL</h2>
+
+<pre><code>https://example.com:443/notes/17?sort=desc&amp;page=2#comments
+\___/   \_________/ \_/\_______/ \______________/\_______/
+scheme     host    port   path         query      fragment</code></pre>
+
+<div class="table-scroll">
+<table>
+  <tbody>
+    <tr><td><strong>scheme</strong></td><td>Protocol. Implies the default port (80 / 443).</td></tr>
+    <tr><td><strong>host</strong></td><td>Which machine. Sent as the <code>Host</code> header — mandatory in HTTP/1.1.</td></tr>
+    <tr><td><strong>path</strong></td><td>Which resource. <strong>Routing decisions are made on this.</strong></td></tr>
+    <tr><td><strong>query</strong></td><td>After <code>?</code>, <code>key=value</code> joined by <code>&amp;</code>. Fills <code>$_GET</code> regardless of method.</td></tr>
+    <tr><td><strong>fragment</strong></td><td>After <code>#</code>. <strong>Never sent to the server.</strong> Browser-only.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Message shape</h2>
+
+<pre><code>POST /notes?draft=1 HTTP/1.1     ← request line
+Host: localhost:8888             ← headers
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 24
+                                 ← BLANK LINE (required)
+title=Hello&amp;body=World           ← body, exactly Content-Length bytes</code></pre>
+
+<pre><code>HTTP/1.1 200 OK                  ← status line
+Content-Type: text/html; charset=utf-8
+Content-Length: 137
+
+&lt;!DOCTYPE html&gt;…</code></pre>
+
+<p><strong>Lines end <code>\r\n</code>.</strong> The blank line separates headers from body. Without <code>Content-Length</code> or <code>Transfer-Encoding: chunked</code>, the client cannot tell when the body ends.</p>
+
+<h2>Methods</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Method</th><th>Means</th><th>Safe</th><th>Idempotent</th><th>Body</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td>Read</td><td>✓</td><td>✓</td><td>no</td></tr>
+    <tr><td><code>HEAD</code></td><td>Headers only</td><td>✓</td><td>✓</td><td>no</td></tr>
+    <tr><td><code>POST</code></td><td>Submit; server decides</td><td>✕</td><td>✕</td><td>yes</td></tr>
+    <tr><td><code>PUT</code></td><td>Replace at this URL</td><td>✕</td><td>✓</td><td>yes</td></tr>
+    <tr><td><code>PATCH</code></td><td>Partial update</td><td>✕</td><td>✕</td><td>yes</td></tr>
+    <tr><td><code>DELETE</code></td><td>Remove</td><td>✕</td><td>✓</td><td>no</td></tr>
+    <tr><td><code>OPTIONS</code></td><td>What's allowed here</td><td>✓</td><td>✓</td><td>no</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Safe</strong> = changes nothing. <strong>Idempotent</strong> = N times equals once, which is what makes retry safe. Never put a destructive action behind <code>GET</code> — crawlers and prefetchers will fire it.</p>
+
+<h2>Status codes worth knowing cold</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Code</th><th>Name</th><th>Use when</th></tr></thead>
+  <tbody>
+    <tr><td><code>200</code></td><td>OK</td><td>Success with a body</td></tr>
+    <tr><td><code>201</code></td><td>Created</td><td>A resource now exists — include <code>Location</code></td></tr>
+    <tr><td><code>204</code></td><td>No Content</td><td>Success, deliberately no body</td></tr>
+    <tr><td><code>301</code></td><td>Moved Permanently</td><td>Cached aggressively — hard to undo. Be sure</td></tr>
+    <tr><td><code>302</code></td><td>Found</td><td>Temporary. What post-redirect-get uses</td></tr>
+    <tr><td><code>303</code></td><td>See Other</td><td>Strictly correct for redirect-after-POST</td></tr>
+    <tr><td><code>304</code></td><td>Not Modified</td><td>Cached copy still valid; no body sent</td></tr>
+    <tr><td><code>400</code></td><td>Bad Request</td><td>Malformed — syntax, unparseable</td></tr>
+    <tr><td><code>401</code></td><td>Unauthorized</td><td>Actually means <em>unauthenticated</em></td></tr>
+    <tr><td><code>403</code></td><td>Forbidden</td><td>Authenticated, still not allowed</td></tr>
+    <tr><td><code>404</code></td><td>Not Found</td><td>No resource — also the honest answer when existence is sensitive</td></tr>
+    <tr><td><code>405</code></td><td>Method Not Allowed</td><td>Path exists, verb doesn't. <strong>Must send <code>Allow</code></strong></td></tr>
+    <tr><td><code>409</code></td><td>Conflict</td><td>Clashes with current state</td></tr>
+    <tr><td><code>422</code></td><td>Unprocessable Content</td><td>Parsed fine, failed validation</td></tr>
+    <tr><td><code>429</code></td><td>Too Many Requests</td><td>Rate limited — send <code>Retry-After</code></td></tr>
+    <tr><td><code>500</code></td><td>Internal Server Error</td><td>We broke</td></tr>
+    <tr><td><code>502</code></td><td>Bad Gateway</td><td>Proxy got nothing usable from upstream — <em>PHP-FPM is down</em></td></tr>
+    <tr><td><code>503</code></td><td>Service Unavailable</td><td>Down or overloaded, temporarily</td></tr>
+    <tr><td><code>504</code></td><td>Gateway Timeout</td><td>Proxy waited too long — <em>your PHP is slow or hung</em></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>The rule:</strong> 4xx = the request was wrong. 5xx = we were wrong. Returning 200 with "not found" in the body is a real bug — crawlers index it, monitoring never alerts.</p>
+
+<h2>Headers you will actually use</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Header</th><th>Direction</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>Host</code></td><td>→</td><td>Which site. Mandatory. Enables virtual hosting</td></tr>
+    <tr><td><code>Content-Type</code></td><td>↔</td><td>How to parse the body. Always add <code>; charset=utf-8</code> on text</td></tr>
+    <tr><td><code>Content-Length</code></td><td>↔</td><td><strong>Bytes</strong>, not characters. Use <code>strlen()</code></td></tr>
+    <tr><td><code>Accept</code></td><td>→</td><td>What the client wants back — content negotiation</td></tr>
+    <tr><td><code>Cookie</code> / <code>Set-Cookie</code></td><td>↔</td><td>The state workaround for a stateless protocol</td></tr>
+    <tr><td><code>Location</code></td><td>←</td><td>Where to go, with a 3xx or a 201</td></tr>
+    <tr><td><code>Allow</code></td><td>←</td><td>Permitted methods. Required with 405</td></tr>
+    <tr><td><code>Cache-Control</code></td><td>←</td><td><code>no-store</code>, <code>max-age=3600</code>, <code>private</code>, <code>public</code></td></tr>
+    <tr><td><code>ETag</code> / <code>If-None-Match</code></td><td>↔</td><td>Content fingerprint → 304 when unchanged</td></tr>
+    <tr><td><code>Last-Modified</code> / <code>If-Modified-Since</code></td><td>↔</td><td>Timestamp version of the same</td></tr>
+    <tr><td><code>Authorization</code></td><td>→</td><td><code>Bearer &lt;token&gt;</code>, <code>Basic &lt;base64&gt;</code></td></tr>
+    <tr><td><code>X-Forwarded-For</code></td><td>→</td><td>Real client IP behind a proxy. <strong>Spoofable — trust only from your own proxy</strong></td></tr>
+    <tr><td><code>Content-Security-Policy</code></td><td>←</td><td>Restricts what the page may load or execute. Defence in depth against XSS</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Headers in PHP</h2>
+
+<div class="table-scroll">
+<table>
+  <tbody>
+    <tr><td>Request header <code>User-Agent</code></td><td><code>$_SERVER['HTTP_USER_AGENT']</code></td></tr>
+    <tr><td>Request header <code>X-Api-Key</code></td><td><code>$_SERVER['HTTP_X_API_KEY']</code></td></tr>
+    <tr><td>Method / URI / query</td><td><code>REQUEST_METHOD</code>, <code>REQUEST_URI</code>, <code>QUERY_STRING</code></td></tr>
+    <tr><td>Send a header</td><td><code>header('Content-Type: application/json');</code></td></tr>
+    <tr><td>Set the status</td><td><code>http_response_code(404);</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The rule: <code>HTTP_</code> + name uppercased, dashes to underscores — a CGI convention from 1993. Headers must be sent <strong>before any output</strong>; a single stray byte locks them, which is why PHP-only files omit the closing <code>?&gt;</code>.</p>
+
+<h2>Talking HTTP without a browser</h2>
+
+<pre><code>curl -i URL                       <span class="c"># response with headers</span>
+curl -I URL                       <span class="c"># HEAD — headers only</span>
+curl -v URL                       <span class="c"># show the request too</span>
+curl -X POST -d 'a=1&amp;b=2' URL     <span class="c"># form body</span>
+curl -H 'Accept: application/json' URL
+curl --path-as-is URL             <span class="c"># don't normalise ../ — needed for traversal tests</span>
+
+printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc HOST PORT
+
+exec 3&lt;&gt;/dev/tcp/example.com/80   <span class="c"># bash can open a socket directly</span>
+printf 'GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n' &gt;&amp;3
+cat &lt;&amp;3</code></pre>
+
+<footer class="lesson-foot">
+  <div class="nextprev">
+    <a href="glossary.html">← Glossary</a>
+    <a href="shell-cheatsheet.html">Shell cheat sheet →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

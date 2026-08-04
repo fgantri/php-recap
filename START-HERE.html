@@ -1,0 +1,187 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Low-Level Web Development — Weekend Bootcamp</title>
+<link rel="stylesheet" href="assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Fri 31 Jul — Sun 2 Aug 2026</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Low-Level Web Development</strong>
+  </div>
+  <nav>
+    <a href="reference/glossary.html">Glossary</a>
+    <a href="MISSION.md">Mission</a>
+    <a href="RESOURCES.md">Resources</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>From the transistor to the framework, in one weekend</h1>
+
+<p class="subtitle">Twenty-four lessons and four milestone projects that rebuild your PHP course from underneath — so that every framework you meet afterwards is a rearrangement of parts you already own.</p>
+
+<div class="meta">
+  <span>25 lessons</span><span>4 projects</span><span>~24 hours</span><span>Resume course Mon 3 Aug</span>
+</div>
+
+<p>Your course notes say something worth repeating before anything else, because every lesson here is a piece of it:</p>
+
+<blockquote class="callout foundation">
+  <span class="label">The whole of web development</span>
+  <p>A browser sends <strong>text</strong> over a network to a program that is listening on a port. That program hands the text to PHP. PHP runs your code top to bottom, possibly asking a database for data, and produces more <strong>text</strong>. That text goes back over the network, and the browser draws it.</p>
+</blockquote>
+
+<p>The course taught you that sentence. This weekend takes each noun in it — <em>browser, text, network, program, listening, port, database, draws</em> — and opens it up. That is the entire difference between knowing PHP and knowing the web.</p>
+
+<h2>Before Friday morning</h2>
+
+<p>Your machine has git, node, python and curl. It does <strong>not</strong> have PHP or a database — and you are going to install them <strong>one rung at a time, at the moment you need them</strong>, rather than as one opaque command.</p>
+
+<p>That is deliberate. Being handed <code>sudo apt install</code> with six packages you can't justify is the same problem as being handed XAMPP: a bundle you operate without a model of what's inside it. So the first lesson is about the tools themselves.</p>
+
+<p><strong>Start with <a href="lessons/0000-what-am-i-installing.html">Lesson 0000</a>.</strong> It ends by having you install exactly one package.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:2rem"></th><th>Install</th><th>Unlocks</th><th>When</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>php-cli</code></td><td>Running PHP at all — including <code>php -S</code>, which <em>is</em> a web server</td><td>Lesson 0000</td></tr>
+    <tr><td>2</td><td><code>php-mbstring php-curl php-sqlite3</code></td><td>Real text handling, outbound HTTP, storage with no server</td><td>Lesson 0009</td></tr>
+    <tr><td>3</td><td><code>mariadb-server php-mysql</code></td><td>A shared database over a network</td><td>Lesson 0016</td></tr>
+    <tr><td>4</td><td><code>nginx php-fpm</code> <em>(optional)</em></td><td>What production actually runs</td><td>Lesson 0007</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Each lesson that needs a new package says which, and why, and what specifically breaks without it. By Sunday you will have the same tools XAMPP would have given you — and you will be able to justify every one.</p>
+
+<div class="callout warn">
+  <span class="label">One WSL quirk to know now</span>
+  <p>This workspace lives under <code>/mnt/c/</code>, which is the Windows filesystem seen through a translation layer. File permissions there are largely fictional and <code>chmod</code> often does nothing. When Lesson 0002 covers permissions, do that exercise in <code>~/</code> (the real Linux filesystem) instead. Your <em>projects</em> should live in <code>~/websites/</code> for the same reason — WSL is markedly faster there.</p>
+</div>
+
+<h2>Friday — The machine and the wire</h2>
+
+<p>Nothing about PHP. This day is about what PHP is standing on: processes, files, sockets, and the protocol. Most developers never learn this layer and spend a career guessing at it.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:3.4rem"></th><th>Lesson</th><th>The single win</th><th style="width:4rem">Time</th></tr></thead>
+  <tbody data-lessons>
+    <tr data-id="0000"><td><span class="pill day1">0000</span></td><td><a href="lessons/0000-what-am-i-installing.html">What Am I Actually Installing?</a></td><td>Never install a tool you can't justify</td><td>35m</td></tr>
+    <tr data-id="0001"><td><span class="pill day1">0001</span></td><td><a href="lessons/0001-bytes-programs-processes.html">Bytes, Programs, Processes</a></td><td>Why <code>.php</code> needs no build step</td><td>30m</td></tr>
+    <tr data-id="0002"><td><span class="pill day1">0002</span></td><td><a href="lessons/0002-the-filesystem.html">The Filesystem as a Tree</a></td><td>What "file not found" really means</td><td>30m</td></tr>
+    <tr data-id="0003"><td><span class="pill day1">0003</span></td><td><a href="lessons/0003-the-shell.html">The Shell, Properly</a></td><td>Resolve a command the way bash does</td><td>50m</td></tr>
+    <tr data-id="0004"><td><span class="pill day1">0004</span></td><td><a href="lessons/0004-sockets-and-ports.html">Sockets, Ports, and the Accept Loop</a></td><td>Write the four lines that <em>are</em> a server</td><td>50m</td></tr>
+    <tr data-id="0005"><td><span class="pill day1">0005</span></td><td><a href="lessons/0005-http-is-text.html">HTTP Is Just Text</a></td><td>Speak HTTP by hand, no browser</td><td>50m</td></tr>
+    <tr data-id="0006"><td><span class="pill day1">0006</span></td><td><a href="lessons/0006-url-to-pixels.html">From URL to Pixels</a></td><td>Name all nine hops, in order</td><td>45m</td></tr>
+    <tr data-id="0007"><td><span class="pill day1">0007</span></td><td><a href="lessons/0007-server-vs-runtime.html">Web Server vs Application Runtime</a></td><td>What nginx does that <code>php -S</code> doesn't</td><td>45m</td></tr>
+    <tr data-id="P1"><td><span class="pill project">Proj</span></td><td><a href="projects/01-http-server.html">Project 1 — An HTTP server from raw sockets</a></td><td>Serve real files to a real browser</td><td>2h</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Saturday — The language and the structure</h2>
+
+<p>Now PHP — but taught as a machine rather than a syntax. Every construct is introduced by the mechanism underneath it: the call stack behind functions, the hash map behind arrays, the opcode array behind the file itself.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:3.4rem"></th><th>Lesson</th><th>The single win</th><th style="width:4rem">Time</th></tr></thead>
+  <tbody data-lessons>
+    <tr data-id="0008"><td><span class="pill day2">0008</span></td><td><a href="lessons/0008-how-php-runs.html">How PHP Actually Runs a File</a></td><td>Parse → opcodes → execute → forget everything</td><td>40m</td></tr>
+    <tr data-id="0009"><td><span class="pill day2">0009</span></td><td><a href="lessons/0009-variables-and-memory.html">Variables, Types, Memory</a></td><td>Why copying a big array is free</td><td>40m</td></tr>
+    <tr data-id="0010"><td><span class="pill day2">0010</span></td><td><a href="lessons/0010-truth-and-coercion.html">Truth, Comparison, Coercion</a></td><td>Predict any <code>==</code> without running it</td><td>40m</td></tr>
+    <tr data-id="0011"><td><span class="pill day2">0011</span></td><td><a href="lessons/0011-arrays-are-hashmaps.html">Arrays Are Hash Maps</a></td><td>Know the cost of every array operation</td><td>45m</td></tr>
+    <tr data-id="0012"><td><span class="pill day2">0012</span></td><td><a href="lessons/0012-functions-and-the-stack.html">Functions, the Stack, Closures</a></td><td>Read a stack trace like a sentence</td><td>50m</td></tr>
+    <tr data-id="0013"><td><span class="pill day2">0013</span></td><td><a href="lessons/0013-templating-and-escaping.html">Templating and Escaping</a></td><td>Build a template engine in 12 lines</td><td>50m</td></tr>
+    <tr data-id="0014"><td><span class="pill day2">0014</span></td><td><a href="lessons/0014-routing-front-controller.html">Routing and the Front Controller</a></td><td>One entry point, any URL</td><td>50m</td></tr>
+    <tr data-id="0015"><td><span class="pill day2">0015</span></td><td><a href="lessons/0015-reading-failure.html">Reading Failure</a></td><td>Diagnose from the shape of the broken page</td><td>35m</td></tr>
+    <tr data-id="P2"><td><span class="pill project">Proj</span></td><td><a href="projects/02-mini-framework.html">Project 2 — Front controller + router by hand</a></td><td>Route params, HTTP methods, 404/403</td><td>2h</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Sunday — Data, danger, and the bridge</h2>
+
+<p>Storage, the attack that has been in the OWASP Top Ten since the list existed, and then the map: every hand-built piece named in Laravel, Symfony, WordPress, Shopware, Next.js, Vite and Cloudflare terms.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:3.4rem"></th><th>Lesson</th><th>The single win</th><th style="width:4rem">Time</th></tr></thead>
+  <tbody data-lessons>
+    <tr data-id="0016"><td><span class="pill day3">0016</span></td><td><a href="lessons/0016-why-a-database.html">Why a Database, Not a File</a></td><td>Name the six things you'd have to build</td><td>35m</td></tr>
+    <tr data-id="0017"><td><span class="pill day3">0017</span></td><td><a href="lessons/0017-sql-is-declarative.html">SQL Is Declarative</a></td><td>Describe results, not steps</td><td>50m</td></tr>
+    <tr data-id="0018"><td><span class="pill day3">0018</span></td><td><a href="lessons/0018-indexes-and-btrees.html">Indexes and B-Trees</a></td><td>Predict which query needs an index</td><td>40m</td></tr>
+    <tr data-id="0019"><td><span class="pill day3">0019</span></td><td><a href="lessons/0019-objects-and-pdo.html">Objects, Classes, PDO</a></td><td>Blueprint vs instance, and the DSN</td><td>50m</td></tr>
+    <tr data-id="0020"><td><span class="pill day3">0020</span></td><td><a href="lessons/0020-data-becoming-code.html">When Data Becomes Code</a></td><td>Run the attack, then close it</td><td>55m</td></tr>
+    <tr data-id="0021"><td><span class="pill day3">0021</span></td><td><a href="lessons/0021-relationships-integrity.html">Relationships and Integrity</a></td><td>Push invariants into the database</td><td>45m</td></tr>
+    <tr data-id="0022"><td><span class="pill day3">0022</span></td><td><a href="lessons/0022-full-request-cycle.html">The Full Request Cycle</a></td><td>404 vs 403, and why it's a judgement call</td><td>45m</td></tr>
+    <tr data-id="0023"><td><span class="pill day3">0023</span></td><td><a href="lessons/0023-state-sessions-csrf.html">State: Cookies, Sessions, POST, CSRF</a></td><td>How a stateless protocol remembers you</td><td>55m</td></tr>
+    <tr data-id="0024"><td><span class="pill day3">0024</span></td><td><a href="lessons/0024-from-here-to-everything.html">From Here to Everything</a></td><td>The whole ecosystem, mapped to your code</td><td>50m</td></tr>
+    <tr data-id="P3"><td><span class="pill project">Proj</span></td><td><a href="projects/03-notes-app.html">Project 3 — The notes app, complete</a></td><td>DB, auth, ownership, CSRF, escaping</td><td>2h</td></tr>
+    <tr data-id="P4"><td><span class="pill project">Proj</span></td><td><a href="projects/04-request-response.html">Project 4 — Request/Response + middleware</a></td><td>The last step before a real framework</td><td>1.5h</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>How to work through this</h2>
+
+<div class="grid two">
+  <div class="card">
+    <h4>Type everything</h4>
+    <p>Do not copy-paste. Your course said it and it is right: the muscle memory for <code>&lt;?php ?&gt;</code> only comes from typing it badly a hundred times. The same is true of <code>socket_bind</code> and <code>PDO::FETCH_ASSOC</code>.</p>
+  </div>
+  <div class="card">
+    <h4>Answer before revealing</h4>
+    <p>Every lesson has retrieval prompts with a hidden answer. Say your answer out loud <em>first</em>. Recalling badly and then seeing the answer builds far more durable memory than reading a correct answer smoothly.</p>
+  </div>
+  <div class="card">
+    <h4>Break it on purpose</h4>
+    <p>Where a lesson says "now make it fail", make it fail. Knowing the <em>shape</em> of a broken page — blank vs partial vs 500 — is a diagnostic skill you cannot get from working code.</p>
+  </div>
+  <div class="card">
+    <h4>Ask me anything</h4>
+    <p>I am the teacher for this course, not just its author. When something is unclear, ask in the terminal — including "explain that again but for someone who knows JavaScript".</p>
+  </div>
+</div>
+
+<h2>Reference — keep these open</h2>
+
+<ul>
+  <li><a href="reference/glossary.html">Glossary</a> — every term this course uses, defined once and used consistently</li>
+  <li><a href="reference/http-cheatsheet.html">HTTP cheat sheet</a> — methods, status codes, headers, URL anatomy</li>
+  <li><a href="reference/shell-cheatsheet.html">Shell cheat sheet</a> — the commands that matter, plus what each one <em>is</em></li>
+  <li><a href="reference/php-cheatsheet.html">PHP cheat sheet</a> — syntax, superglobals, array functions, PDO</li>
+  <li><a href="reference/sql-cheatsheet.html">SQL cheat sheet</a> — DDL, DML, joins, index rules</li>
+  <li><a href="reference/security-cheatsheet.html">Security cheat sheet</a> — the injection family and its defences</li>
+</ul>
+
+<div class="ask">
+  <strong>The rule for the whole weekend:</strong> if you can't explain a lesson's single win to an imaginary colleague without looking, you have not finished that lesson. Fluency in the moment is not the same as retention on Monday — and Monday is the point.
+</div>
+
+</div>
+
+<script src="assets/widgets.js"></script>
+<script>
+  (() => {
+    const done = window.Bootcamp.readStore().done || {};
+    let complete = 0;
+    let total = 0;
+    document.querySelectorAll("[data-lessons] tr").forEach((row) => {
+      total += 1;
+      if (!done[row.dataset.id]) return;
+      complete += 1;
+      row.style.opacity = "0.55";
+      row.querySelector("td:nth-child(2)").insertAdjacentHTML("beforeend",
+        ' <span style="color:var(--ok);font-family:var(--sans);font-size:0.75rem">✓</span>');
+    });
+    if (complete) {
+      document.querySelector(".meta").insertAdjacentHTML("beforeend",
+        `<span style="color:var(--ok)">${complete} of ${total} complete</span>`);
+    }
+  })();
+</script>

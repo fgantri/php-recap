@@ -1,0 +1,351 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0015 — Reading Failure</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0015</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Reading Failure</h1>
+<p class="subtitle">Your course said learning to read error messages "is a larger skill than learning the syntax". It is. Here is the systematic version — diagnosing from the shape of the breakage before you read a single line.</p>
+
+<div class="meta"><span>35 minutes</span><span>Win: diagnose from the shape of the broken page</span></div>
+
+<h2>Diagnose from the symptom</h2>
+
+<p>Before opening any file, the <em>shape</em> of the failure narrows the cause enormously. Work through these — guess before revealing.</p>
+
+<div class="widget" id="diag">
+  <div class="widget-title">
+    <span>Symptom → cause</span>
+    <span id="diag-score" style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink-faint)"></span>
+  </div>
+  <div id="diag-rows"></div>
+  <button type="button" id="diag-reset" style="margin-top:0.9rem">Start over</button>
+</div>
+
+<h2>The error hierarchy PHP 7 introduced</h2>
+
+<p>This trips up people who learned PHP earlier, and it is short enough to just know:</p>
+
+<figure>
+<svg viewBox="0 0 520 148" role="img" aria-label="PHP's Throwable hierarchy: Error and Exception">
+  <rect x="180" y="6" width="140" height="28" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="250" y="24" class="svg-mono" text-anchor="middle">Throwable</text>
+  <text x="330" y="24" class="svg-small">interface — catch this to catch everything</text>
+
+  <path d="M215 36 C 215 50, 130 50, 130 62" class="svg-stroke"/>
+  <path d="M285 36 C 285 50, 370 50, 370 62" class="svg-stroke"/>
+
+  <rect x="60" y="62" width="140" height="28" rx="3" class="svg-box"/>
+  <text x="130" y="80" class="svg-mono" text-anchor="middle">Error</text>
+  <rect x="300" y="62" width="140" height="28" rx="3" class="svg-box"/>
+  <text x="370" y="80" class="svg-mono" text-anchor="middle">Exception</text>
+
+  <text x="0" y="110" class="svg-small">TypeError, ValueError,</text>
+  <text x="0" y="122" class="svg-small">ArgumentCountError, DivisionByZeroError,</text>
+  <text x="0" y="134" class="svg-small">ParseError — engine-level problems</text>
+
+  <text x="300" y="110" class="svg-small">RuntimeException,</text>
+  <text x="300" y="122" class="svg-small">InvalidArgumentException,</text>
+  <text x="300" y="134" class="svg-small">PDOException — your problems</text>
+</svg>
+<figcaption><code>catch (Exception $e)</code> does <strong>not</strong> catch a <code>TypeError</code> — they are siblings, not parent and child. If you want everything, catch <code>Throwable</code>. This is the single most common misconception about PHP error handling.</figcaption>
+</figure>
+
+<h2>Configure it correctly, twice</h2>
+
+<p>Development and production want opposite things, and getting this backwards is either painful or dangerous.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Setting</th><th>Local</th><th>Production</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>display_errors</code></td><td><code>On</code></td><td><strong><code>Off</code></strong></td><td>Stack traces leak paths, queries, and sometimes credentials to attackers</td></tr>
+    <tr><td><code>error_reporting</code></td><td><code>E_ALL</code></td><td><code>E_ALL</code></td><td>Report everything in both; just don't <em>display</em> it in production</td></tr>
+    <tr><td><code>log_errors</code></td><td><code>On</code></td><td><code>On</code></td><td>The log is where production errors must go</td></tr>
+    <tr><td><code>display_startup_errors</code></td><td><code>On</code></td><td><code>Off</code></td><td>Catches extension and config problems locally</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Set them for this weekend:</p>
+
+<pre><code>php -i | grep -E '^(display_errors|error_reporting|error_log)'
+
+<span class="c"># or per-run, without touching php.ini</span>
+php -d display_errors=1 -d error_reporting=E_ALL server.php</code></pre>
+
+<div class="callout danger">
+  <span class="label">The blank white page</span>
+  <p>A completely blank page with HTTP 200 in production almost always means: a fatal error occurred, <code>display_errors</code> is off (correctly), and you have not looked at the log yet. It is not a mystery — it is a message delivered somewhere you are not looking.</p>
+  <p><code>tail -f /var/log/php8.4-fpm.log</code>, and separately your nginx error log. Knowing <em>which</em> log holds the answer is most of the diagnosis, and it is the skill Lesson 0007 was setting up.</p>
+</div>
+
+<h2>Catching properly</h2>
+
+<pre><code><span class="k">try</span> {
+    <span class="n">$db</span> = <span class="k">new</span> Database(<span class="n">$config</span>[<span class="s">'database'</span>]);
+} <span class="k">catch</span> (PDOException <span class="n">$e</span>) {
+    error_log(<span class="s">'DB connect failed: '</span> . <span class="n">$e</span>-&gt;getMessage());   <span class="c">// for you</span>
+    abort(503);                                              <span class="c">// for the user</span>
+} <span class="k">finally</span> {
+    <span class="c">// runs either way — release locks, close handles</span>
+}</code></pre>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Three rules that make error handling useful rather than decorative</span>
+  <p><strong>1. Catch narrowly.</strong> <code>catch (Throwable $e)</code> around a whole controller swallows genuine bugs and turns them into a generic message. Catch the specific type you can actually do something about, at the level where you can do it.</p>
+  <p><strong>2. Never catch and continue silently.</strong> An empty <code>catch</code> block is how a system develops symptoms with no cause. If you cannot handle it, let it propagate — a loud failure is far cheaper than a quiet wrong answer.</p>
+  <p><strong>3. Two audiences, two messages.</strong> The user gets "something went wrong" plus a reference. The log gets the type, message, file, line, stack trace and request context. Merging them either leaks internals or throws away your only diagnostic.</p>
+</div>
+
+<h2>One global handler</h2>
+
+<p>Rather than wrapping everything, register handlers once during bootstrap:</p>
+
+<pre><code>set_exception_handler(<span class="k">function</span> (Throwable <span class="n">$e</span>) {
+    error_log(sprintf(
+        <span class="s">"%s: %s in %s:%d\n%s"</span>,
+        get_class(<span class="n">$e</span>), <span class="n">$e</span>-&gt;getMessage(),
+        <span class="n">$e</span>-&gt;getFile(), <span class="n">$e</span>-&gt;getLine(), <span class="n">$e</span>-&gt;getTraceAsString()
+    ));
+
+    http_response_code(500);
+    <span class="k">echo</span> view(<span class="s">'errors/500'</span>);
+});
+
+set_error_handler(<span class="k">function</span> (<span class="n">$severity</span>, <span class="n">$message</span>, <span class="n">$file</span>, <span class="n">$line</span>) {
+    <span class="k">throw new</span> ErrorException(<span class="n">$message</span>, 0, <span class="n">$severity</span>, <span class="n">$file</span>, <span class="n">$line</span>);
+});</code></pre>
+
+<p>The second one is the interesting move: it <strong>promotes warnings into exceptions</strong>, so an ignorable "Undefined array key" becomes a stoppable, catchable, logged event. That single line changes a class of silent wrongness into loud failure, which is nearly always the better trade.</p>
+
+<h2>The tools, in order of power</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Tool</th><th>Good for</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td><code>dd()</code> — your course's dump-and-die</td><td>"What is in this variable, right here"</td><td>None. Instant, works everywhere</td></tr>
+    <tr><td><code>var_export</code></td><td>Copying a structure back into code or a test</td><td>None</td></tr>
+    <tr><td><code>error_log()</code></td><td>Anything where output would break the response — APIs, redirects, loops</td><td>None</td></tr>
+    <tr><td><strong>Xdebug</strong></td><td>Stepping line by line, inspecting the whole stack, conditional breakpoints</td><td>Install + IDE config; slows execution</td></tr>
+    <tr><td>PHPStan / Psalm</td><td>Finding bugs without running anything</td><td>Setup; a wall of findings on legacy code</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Xdebug is not installed on this machine, and that is fine for the weekend — <code>dd()</code> is genuinely enough for everything here. Put <code>sudo apt install php-xdebug</code> on your list for when you're back in the course; a step debugger is the single biggest upgrade to how you diagnose, and most PHP developers postpone it for years.</p>
+
+<div class="widget" data-quiz data-seed="l15">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "<code>catch (Exception $e)</code> wraps a call that throws <code>TypeError</code>. What happens?",
+      "options": [
+        "It is not caught — TypeError is not an Exception",
+        "It is caught, since TypeError extends Exception",
+        "It is caught only when strict_types is enabled",
+        "A fatal error occurs inside the catch block itself"
+      ],
+      "answer": 0,
+      "why": "<code>Error</code> and <code>Exception</code> are siblings under <code>Throwable</code>, not parent and child. Catch <code>Throwable</code> if you genuinely want both — but prefer catching the narrow type you can actually handle."
+    },
+    {
+      "q": "Production shows a blank page, HTTP 200, no error text. First move?",
+      "options": [
+        "Read the PHP-FPM error log",
+        "Turn display_errors on in production",
+        "Add a try/catch around the controller",
+        "Restart PHP-FPM to clear a stuck worker"
+      ],
+      "answer": 0,
+      "why": "The error exists; you are looking in the wrong place. <code>display_errors</code> being off is <em>correct</em> in production — turning it on to debug leaks paths and queries to anyone hitting the URL. The log has the message already."
+    },
+    {
+      "q": "Why promote warnings to exceptions with <code>set_error_handler</code>?",
+      "options": [
+        "It turns silent wrongness into a loud failure",
+        "It makes PHP execute the script more quickly",
+        "It is required for stack traces to be generated",
+        "It suppresses notices from third-party libraries"
+      ],
+      "answer": 0,
+      "why": "\"Undefined array key\" is a warning: execution continues with null and the real symptom appears much later somewhere unrelated. Promoting it makes the failure happen at the point of the mistake — which is the property that makes debugging cheap."
+    },
+    {
+      "q": "A page renders its header and navigation, then stops mid-content. What does the shape tell you?",
+      "options": [
+        "A runtime error — output happened before it failed",
+        "A parse error — the file never began executing",
+        "A 500 from nginx before PHP was reached at all",
+        "An OPcache stale-file problem on the last deploy"
+      ],
+      "answer": 0,
+      "why": "Partial output proves execution started, so parsing succeeded. Something failed part-way through — most often a null, a missing key, or an undefined method. Totally blank would point at a parse error instead. This is your course's diagnostic, and it is genuinely reliable."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "You are handed a broken page. Describe the diagnostic order you would follow, from before opening any file to finding the line. Include what each observation rules out.",
+  "answer": "<p><strong>1. Look at the shape.</strong> Totally blank → parse error, or a fatal with display_errors off. Partial render → runtime error after output began. Correct-looking page with wrong data → logic error, not an error at all. 502/504 → the request never reached, or never returned from, PHP.</p><p><strong>2. Check the status code</strong> in DevTools' Network tab. A 200 with a broken page and a 500 are entirely different investigations.</p><p><strong>3. Find the message.</strong> Locally, on screen. In production, the PHP-FPM log — and the nginx log if it's a 5xx from the proxy.</p><p><strong>4. Read the trace last-line-first</strong> for where it died, then the message literally, then the frames for how you arrived, then the first frame in your own code.</p><p><strong>5. Confirm before fixing</strong> — <code>dd()</code> the variable the message named. Verifying the diagnosis costs seconds and prevents fixing the wrong thing.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.php.net/manual/en/language.errors.php7.php">PHP Manual — Errors in PHP 7</a> for the Throwable hierarchy, and <a href="https://www.php.net/manual/en/errorfunc.configuration.php">the error configuration reference</a> for the settings table.
+  <br><br>
+  When you install it: <a href="https://xdebug.org/docs/step_debug">Xdebug's step-debugging guide</a>. Budget an hour to wire it into VS Code once; it repays that within a week.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0015" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"set up Xdebug with VS Code in this WSL"</em> when you're ready — it's fiddly and worth doing with help. Or: <em>"write the global error handler for my project with a proper error view"</em>, which you'll want for Project 2 anyway.
+  </div>
+
+  <div class="nextprev">
+    <a href="0014-routing-front-controller.html">← 0014 — Routing and the Front Controller</a>
+    <a href="../projects/02-mini-framework.html">Project 2 — Front controller + router by hand →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const CASES = [
+      {
+        symptom: "Completely blank page. No text at all, not even the header.",
+        options: ["Parse error — nothing executed", "Runtime error midway", "Wrong database credentials", "Missing CSS stylesheet"],
+        answer: 0,
+        why: "Parsing covers the whole file before execution begins, so a syntax error anywhere means zero output — including from correct lines above it. A runtime error would have let the header through first.",
+      },
+      {
+        symptom: "Header and navigation render, then the page stops mid-content.",
+        options: ["Runtime error after output began", "Parse error in an included file", "The web server timed out", "Output buffering was never flushed"],
+        answer: 0,
+        why: "Partial output proves execution started successfully. Something failed part-way — typically calling a method on null, or a missing array key in a view.",
+      },
+      {
+        symptom: "502 Bad Gateway on every page, immediately.",
+        options: ["nginx cannot reach PHP-FPM", "Your PHP threw an uncaught error", "The database refused the connection", "A redirect loop between two routes"],
+        answer: 0,
+        why: "502 means the proxy could not get a usable response from upstream — FPM is down or the socket path is wrong. An uncaught PHP error would be a 500; a slow one would be 504.",
+      },
+      {
+        symptom: "Everything works locally. On the server, every clean URL 404s but the home page is fine.",
+        options: ["The try_files fallback is missing", "The routes file was not deployed", "File permissions block the controllers", "OPcache is serving an older route table"],
+        answer: 0,
+        why: "The home page works because <code>/</code> resolves to a real directory with an index. Every other URL has no file behind it and needs the front-controller fallback. This is the single most common PHP deployment bug.",
+      },
+      {
+        symptom: "You deployed a fix. The old behaviour persists. The file on disk is definitely correct.",
+        options: ["OPcache is serving cached opcodes", "The browser cached the whole page", "Git deployed to the wrong branch", "The load balancer is sticky"],
+        answer: 0,
+        why: "With <code>validate_timestamps=0</code>, OPcache never rechecks files. Reloading PHP-FPM must be part of your deploy — see Lesson 0008.",
+      },
+      {
+        symptom: "\"Cannot modify header information — headers already sent by … line 1\"",
+        options: ["Output was emitted before a header call", "The header value contained a newline", "Two redirects were issued in sequence", "The session started after output began"],
+        answer: 0,
+        why: "HTTP requires headers before the body. Once any byte is output — including a stray space after a closing <code>?&gt;</code> — headers are locked. This is exactly why your course said to omit the closing tag in PHP-only files.",
+      },
+      {
+        symptom: "The page renders, but a value shows as empty. No error anywhere.",
+        options: ["A warning was raised and display is off", "A parse error in the view file", "The response was truncated early", "The template engine failed silently"],
+        answer: 0,
+        why: "\"Undefined array key\" is a <em>warning</em>: PHP substitutes null and carries on. This is precisely the silent wrongness that promoting warnings to exceptions eliminates.",
+      },
+    ];
+
+    const container = document.getElementById("diag-rows");
+    const scoreBox = document.getElementById("diag-score");
+    const state = { answered: 0, right: 0 };
+
+    const build = () => {
+      state.answered = 0;
+      state.right = 0;
+      scoreBox.textContent = `${CASES.length} to diagnose`;
+      container.textContent = "";
+
+      CASES.forEach((item, index) => {
+        const block = document.createElement("div");
+        block.style.cssText = "padding:0.6rem 0;border-bottom:1px solid var(--rule-soft)";
+
+        const symptom = document.createElement("div");
+        symptom.style.cssText = "font-weight:600;font-size:0.86rem;margin-bottom:0.45rem;line-height:1.45";
+        symptom.textContent = `${index + 1}. ${item.symptom}`;
+
+        const opts = document.createElement("div");
+        opts.style.cssText = "display:grid;gap:0.3rem";
+
+        const why = document.createElement("p");
+        why.className = "quiz-why";
+        why.hidden = true;
+
+        const buttons = item.options.map((text, i) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "quiz-opt";
+          button.innerHTML = `<span class="tick">○</span><span>${text}</span>`;
+          button.addEventListener("click", () => {
+            if (opts.dataset.locked) return;
+            opts.dataset.locked = "1";
+            state.answered += 1;
+            state.right += i === item.answer ? 1 : 0;
+
+            buttons.forEach((other, j) => {
+              other.disabled = true;
+              if (j === item.answer) {
+                other.classList.add("correct");
+                other.querySelector(".tick").textContent = "●";
+              } else if (other === button) {
+                other.classList.add("wrong");
+                other.querySelector(".tick").textContent = "✕";
+              } else {
+                other.classList.add("muted");
+              }
+            });
+
+            why.innerHTML = item.why;
+            why.hidden = false;
+            scoreBox.textContent = `${state.right} of ${state.answered} correct`;
+          });
+          return button;
+        });
+
+        opts.append(...buttons);
+        block.append(symptom, opts, why);
+        container.append(block);
+      });
+    };
+
+    document.getElementById("diag-reset").addEventListener("click", build);
+    build();
+  })();
+</script>

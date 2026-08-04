@@ -1,0 +1,228 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0021 — Relationships and Integrity</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0021</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/sql-cheatsheet.html">SQL sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Relationships and Integrity</h1>
+<p class="subtitle">A constraint in the database cannot be bypassed by any application, any migration script, or any developer at a console. That property is why invariants belong as close to the data as possible.</p>
+
+<div class="meta"><span>45 minutes</span><span>Win: push invariants into the database</span></div>
+
+<h2>The three shapes</h2>
+
+<figure>
+<svg viewBox="0 0 580 176" role="img" aria-label="One-to-many, one-to-one and many-to-many relationship diagrams">
+  <text x="0" y="12" class="svg-label" style="font-weight:650">one-to-many — the common case</text>
+  <rect x="0" y="20" width="86" height="30" rx="3" class="svg-box"/>
+  <text x="43" y="39" class="svg-mono" text-anchor="middle">users</text>
+  <path d="M90 35 L 150 35" class="svg-stroke" marker-end="url(#g)"/>
+  <text x="96" y="29" class="svg-small">1</text>
+  <text x="136" y="29" class="svg-small">∞</text>
+  <rect x="154" y="20" width="86" height="30" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="197" y="39" class="svg-mono" text-anchor="middle">notes</text>
+  <text x="250" y="33" class="svg-small">FK lives on the MANY side:</text>
+  <text x="250" y="45" class="svg-mono">notes.user_id → users.id</text>
+
+  <text x="0" y="82" class="svg-label" style="font-weight:650">one-to-one</text>
+  <rect x="0" y="90" width="86" height="30" rx="3" class="svg-box"/>
+  <text x="43" y="109" class="svg-mono" text-anchor="middle">users</text>
+  <path d="M90 105 L 150 105" class="svg-stroke" marker-end="url(#g)"/>
+  <text x="96" y="99" class="svg-small">1</text>
+  <text x="140" y="99" class="svg-small">1</text>
+  <rect x="154" y="90" width="86" height="30" rx="3" class="svg-box"/>
+  <text x="197" y="109" class="svg-mono" text-anchor="middle">profiles</text>
+  <text x="250" y="103" class="svg-small">FK on either side,</text>
+  <text x="250" y="115" class="svg-small">plus a UNIQUE constraint</text>
+
+  <text x="0" y="152" class="svg-label" style="font-weight:650">many-to-many — needs a third table</text>
+  <rect x="0" y="158" width="70" height="18" rx="3" class="svg-box"/>
+  <text x="35" y="171" class="svg-mono" text-anchor="middle">posts</text>
+  <path d="M74 167 L 106 167" class="svg-stroke"/>
+  <rect x="110" y="158" width="90" height="18" rx="3" class="svg-box" style="stroke:var(--link)"/>
+  <text x="155" y="171" class="svg-mono" text-anchor="middle">post_tag</text>
+  <path d="M204 167 L 236 167" class="svg-stroke"/>
+  <rect x="240" y="158" width="70" height="18" rx="3" class="svg-box"/>
+  <text x="275" y="171" class="svg-mono" text-anchor="middle">tags</text>
+  <text x="320" y="171" class="svg-small">the pivot holds pairs of ids — neither side can hold the key</text>
+
+  <defs>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>Naming convention: <code>&lt;singular_table&gt;_id</code>. Follow it and every framework's conventions work with no configuration — Eloquent, Doctrine and Rails all assume it.</figcaption>
+</figure>
+
+<h2>The inconsistency, and what it costs</h2>
+
+<p>Your course made the point by setting a note's <code>user_id</code> to <code>0</code>. It saved without complaint. There is no user with id 0.</p>
+
+<div class="callout danger">
+  <span class="label">Why orphans are worse than a crash</span>
+  <p>An <span class="term">orphan record</span> does not announce itself. It makes your data <em>quietly wrong</em>:</p>
+  <ul style="margin:0.5rem 0">
+    <li>An <code>INNER JOIN</code> silently drops the row. Your "notes per user" report is short and looks plausible.</li>
+    <li>A dashboard count is low. Nobody notices, because nobody knows the true number.</li>
+    <li>A page shows a blank author name where a name should be.</li>
+    <li>The wrongness compounds — every derived figure inherits it.</li>
+  </ul>
+  <p>A crash gets fixed on Tuesday. A number that is wrong and looks right gets used in a decision.</p>
+</div>
+
+<h2>The constraint</h2>
+
+<pre><code>ALTER TABLE notes
+ADD CONSTRAINT notes_user_id_foreign
+FOREIGN KEY (user_id) REFERENCES users(id)
+ON DELETE CASCADE;</code></pre>
+
+<p>Now try <code>user_id = 0</code> again. The database refuses. Not your validation code — <strong>the database</strong>, which means it holds no matter what touches the data: a migration, a console session, a second application, a bug in a code path you forgot existed.</p>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Two requirements people forget</span>
+  <p><strong>The types must match exactly.</strong> <code>users.id</code> is <code>INT UNSIGNED</code>, so <code>notes.user_id</code> must be <code>INT UNSIGNED</code> too. A mismatch either refuses to create the constraint or causes silent slow conversions on every join. This is the single most common reason a <code>FOREIGN KEY</code> statement errors.</p>
+  <p><strong>The engine must be InnoDB.</strong> MyISAM accepts foreign key syntax and <em>silently ignores it</em> — no error, no constraint, no protection. Ancient tables and cheap hosting still default to it. Check with <code>SHOW TABLE STATUS</code>.</p>
+</div>
+
+<h2>Unique indexes: a rule and a speed-up at once</h2>
+
+<pre><code>ALTER TABLE users ADD UNIQUE KEY users_email_unique (email);</code></pre>
+
+<p>A unique index does double duty — it makes lookups by email fast <em>and</em> makes duplicates impossible. That second property is the point.</p>
+
+<div class="callout warn">
+  <span class="label">Why an application check is not enough</span>
+  <pre style="margin:0.6rem 0"><code>// Two requests arrive at the same moment
+$existing = $db->query('SELECT id FROM users WHERE email = ?', [$email])->fetch();
+if ($existing) { abort(422); }
+$db->query('INSERT INTO users (email) VALUES (?)', [$email]);</code></pre>
+  <p>Both requests run the SELECT, both find nothing, both INSERT. <strong>Two users, one email.</strong> This is the identical race condition from <a href="0016-why-a-database.html">Lesson 0016</a>'s counter, and no amount of PHP fixes it — the gap between check and insert is where the other request lives.</p>
+  <p>The unique index closes it, because the check and the write are one atomic operation inside the database. Keep the application check for a friendly error message; rely on the constraint for correctness. <strong>Validate for UX, constrain for truth.</strong></p>
+</div>
+
+<h2>Cascade: a decision, not a default</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>ON DELETE</th><th>Behaviour</th><th>Right when</th><th>Wrong when</th></tr></thead>
+  <tbody>
+    <tr><td><code>CASCADE</code></td><td>Delete the children too</td><td>Notes belong to their user; deleting the account should remove them</td><td>The children have independent value or legal significance</td></tr>
+    <tr><td><code>RESTRICT</code></td><td>Refuse while children exist</td><td>Invoices — you may be legally required to keep them</td><td>Cleanup becomes impossible without manual work</td></tr>
+    <tr><td><code>SET NULL</code></td><td>Blank the reference</td><td>A post whose author left but which stays published</td><td>The column is <code>NOT NULL</code> — the constraint can't be created</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Your course said it plainly and it is worth repeating: <strong>there is no default correct answer.</strong> The choice cannot be made from the schema alone — it depends on what the data means and what the business requires. Being asked "should this cascade?" and answering "it depends, and here is what it depends on" is the mark of someone who has thought about it.</p>
+
+<h2>Soft deletes, and their real cost</h2>
+
+<pre><code>ALTER TABLE notes ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL;
+
+UPDATE notes SET deleted_at = NOW() WHERE id = 5;          -- "delete"
+SELECT * FROM notes WHERE deleted_at IS NULL;              -- every read, forever</code></pre>
+
+<p>Nothing is destroyed, deletions are reversible, audit history survives. The cost is that <strong>every query must remember the filter</strong> — and the one that forgets shows deleted data to a user, silently.</p>
+
+<p>That cost is exactly why frameworks provide this as a feature rather than a convention: Laravel's <code>SoftDeletes</code> trait adds a global scope so the filter cannot be forgotten. Knowing what it is protecting you from is more useful than knowing the trait's name.</p>
+
+<div class="widget" data-quiz data-seed="l21">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Your app checks for a duplicate email before inserting, yet duplicates appear in production. Why?",
+      "options": [
+        "Two requests both checked before either inserted",
+        "The check used loose rather than strict comparison",
+        "Email addresses differ in letter case only",
+        "The insert ran before the check completed"
+      ],
+      "answer": 0,
+      "why": "A check-then-act race. Both requests SELECT, both find nothing, both INSERT. Only a unique index closes it, because there the check and the write are one atomic operation. Validate for UX, constrain for truth."
+    },
+    {
+      "q": "You add a FOREIGN KEY and MySQL errors with errno 150. Most likely cause?",
+      "options": [
+        "The column types do not match exactly",
+        "The referenced table contains no rows yet",
+        "The referencing column already has an index",
+        "Cascade behaviour was not specified"
+      ],
+      "answer": 0,
+      "why": "Type mismatch — usually <code>INT</code> against <code>INT UNSIGNED</code>, or differing charsets on string keys. The referenced column must also be indexed (a primary key already is). An empty referenced table is fine."
+    },
+    {
+      "q": "Deleting a customer should never silently remove their invoices. Which cascade rule?",
+      "options": [
+        "RESTRICT — refuse while invoices exist",
+        "CASCADE — remove the invoices together",
+        "SET NULL — detach the invoices instead",
+        "SET DEFAULT — point them at a placeholder"
+      ],
+      "answer": 0,
+      "why": "RESTRICT forces an explicit decision rather than quiet destruction of records you may be legally required to retain. CASCADE is right for personal notes and wrong here — the same schema shape, opposite answers, decided by meaning."
+    },
+    {
+      "q": "What breaks when soft deletes are adopted?",
+      "options": [
+        "Every query must now exclude deleted rows",
+        "Foreign key constraints stop being enforced",
+        "Unique indexes reject previously deleted values",
+        "Cascade deletes no longer reach child records"
+      ],
+      "answer": 0,
+      "why": "The filter must appear everywhere, forever, and the query that forgets shows deleted data with no error. (There is a second, subtler problem: a unique index on email now blocks re-registration with a soft-deleted address — which is why frameworks make the deleted timestamp part of the unique key.)"
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Argue the case for putting a uniqueness rule in the database rather than in application code. Then name the three cascade options and give a domain where each is the right answer.",
+  "answer": "<p><strong>The case:</strong> application checks are check-then-act, so two concurrent requests can both pass the check before either writes — a race that no amount of careful PHP closes. A unique index makes the check and the write a single atomic operation inside the database. Beyond concurrency, application code can simply be bypassed: a migration script, a console session, a second service, an admin tool, or a code path nobody remembered. The database is the one layer everything must pass through. Keep the application check for a friendly error message; rely on the constraint for correctness.</p><p><strong>Cascades:</strong> <code>CASCADE</code> for a user's personal notes — they are the user's and should go with them. <code>RESTRICT</code> for a customer's invoices — refuse the delete and force an explicit decision, since the records may be legally required. <code>SET NULL</code> for a published article whose author left the company — the article stays, the authorship becomes unknown (and the column must be nullable for this to be creatable at all).</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://dev.mysql.com/doc/refman/8.0/en/create-table-foreign-keys.html">MySQL — FOREIGN KEY Constraints</a>. Read the "Referential Actions" section for the exact cascade semantics, and the conditions-and-restrictions section, which lists precisely why errno 150 happens.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0021" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"build the notes/users schema in my MariaDB with proper constraints, then try to break it"</em> — inserting an orphan and watching the database refuse is a two-minute exercise that makes the whole lesson concrete.
+  </div>
+
+  <div class="nextprev">
+    <a href="0020-data-becoming-code.html">← 0020 — When Data Becomes Code</a>
+    <a href="0022-full-request-cycle.html">0022 — The Full Request Cycle →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

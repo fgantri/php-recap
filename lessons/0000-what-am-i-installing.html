@@ -1,0 +1,236 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0000 — What Am I Actually Installing?</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · Before anything else</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0000</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>What Am I Actually Installing?</h1>
+<p class="subtitle">School told you to install XAMPP and never said why. Here is the answer — and the reason you probably needed one of its five letters, not five.</p>
+
+<div class="meta"><span>35 minutes</span><span>Win: never install a tool you can't justify</span></div>
+
+<p>This lesson exists because of a fair complaint: being handed an install command you don't understand is <em>the same problem</em> as being handed XAMPP. So before you install anything this weekend, you should be able to say what each piece is and what would break without it.</p>
+
+<p>By the end you will have installed exactly <strong>one</strong> thing.</p>
+
+<h2>Start with the bundle you were given</h2>
+
+<div class="widget" data-xampp></div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Why XAMPP existed, honestly</span>
+  <p>It was not a scam or a teaching failure. In 2002, making Apache, MySQL and PHP work together on Windows meant editing <code>httpd.conf</code> by hand, getting DLL paths right, registering services, and matching version combinations that were known to conflict. It could genuinely take an afternoon and fail for reasons nobody could diagnose. XAMPP bundled a combination that was <em>known to work</em>. That was worth a lot.</p>
+  <p>Two things then happened. <strong>PHP 5.4 (2012) added a built-in web server</strong> — <code>php -S</code> — so Apache stopped being necessary for development. And <strong>SQLite</strong> made a database server optional for anything single-writer. Between them, the problem XAMPP solved largely stopped existing for learners.</p>
+  <p>The lesson to take is not "XAMPP is bad". It is: <strong>a bundle is an answer to a question. Know the question before accepting the answer</strong> — because when the question changes, the bundle silently stops making sense, and nobody tells you.</p>
+</div>
+
+<h2>So what <em>is</em> PHP, as a thing on disk?</h2>
+
+<p>"Install PHP" sounds like installing an application. It is three files-ish, and knowing which is which explains most PHP install problems you will ever hit.</p>
+
+<figure>
+<svg viewBox="0 0 560 172" role="img" aria-label="PHP on disk: a binary, extension shared objects, and an ini file">
+  <rect x="0" y="18" width="168" height="70" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="10" y="36" class="svg-label" style="font-weight:650">1 · the binary</text>
+  <text x="10" y="53" class="svg-mono">/usr/bin/php</text>
+  <text x="10" y="68" class="svg-small">~12 MB. the engine: lexer,</text>
+  <text x="10" y="80" class="svg-small">parser, compiler, VM</text>
+
+  <rect x="188" y="18" width="176" height="70" rx="3" class="svg-box" style="stroke:var(--link)"/>
+  <text x="198" y="36" class="svg-label" style="font-weight:650">2 · the extensions</text>
+  <text x="198" y="53" class="svg-mono">/usr/lib/php/*/pdo_mysql.so</text>
+  <text x="198" y="68" class="svg-small">shared libraries loaded at</text>
+  <text x="198" y="80" class="svg-small">startup. ~70 available</text>
+
+  <rect x="384" y="18" width="176" height="70" rx="3" class="svg-box"/>
+  <text x="394" y="36" class="svg-label" style="font-weight:650">3 · the config</text>
+  <text x="394" y="53" class="svg-mono">/etc/php/8.5/cli/php.ini</text>
+  <text x="394" y="68" class="svg-small">which extensions load,</text>
+  <text x="394" y="80" class="svg-small">memory limits, error display</text>
+
+  <text x="0" y="114" class="svg-label" style="font-weight:650">and the part almost nobody is taught — the SAPI, or "front door"</text>
+  <rect x="0" y="124" width="88" height="24" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+  <text x="44" y="140" class="svg-mono" text-anchor="middle">cli</text>
+  <rect x="96" y="124" width="88" height="24" rx="3" class="svg-box"/>
+  <text x="140" y="140" class="svg-mono" text-anchor="middle">fpm</text>
+  <rect x="192" y="124" width="88" height="24" rx="3" class="svg-box"/>
+  <text x="236" y="140" class="svg-mono" text-anchor="middle">cgi</text>
+  <rect x="288" y="124" width="128" height="24" rx="3" class="svg-box"/>
+  <text x="352" y="140" class="svg-mono" text-anchor="middle">apache2handler</text>
+  <rect x="424" y="124" width="88" height="24" rx="3" class="svg-box"/>
+  <text x="468" y="140" class="svg-mono" text-anchor="middle">phpdbg</text>
+  <text x="0" y="166" class="svg-small">same engine underneath all five — only how a request arrives differs</text>
+</svg>
+<figcaption>You can see this on your own machine right now: <code>apt-cache search --names-only 'php8\.5'</code> lists <code>php8.5-cli</code>, <code>php8.5-fpm</code>, <code>php8.5-cgi</code>, <code>libapache2-mod-php8.5</code> and <code>php8.5-phpdbg</code> as <em>separate packages</em>. That is not five PHPs. It is one PHP with five doors.</figcaption>
+</figure>
+
+<div class="callout win">
+  <span class="label">Two things this immediately explains</span>
+  <p><strong>"Call to undefined function <code>curl_init()</code>"</strong> does not mean PHP is broken or that you wrote it wrong. It means the <code>curl</code> extension isn't loaded. <code>php -m</code> lists what is. Install the package, restart, done.</p>
+  <p><strong>"It works in the terminal but not in the browser"</strong> — the classic. CLI and FPM are different SAPIs with <em>different <code>php.ini</code> files</em>: <code>/etc/php/8.5/cli/php.ini</code> versus <code>/etc/php/8.5/fpm/php.ini</code>. You enabled the extension for one door and not the other. This single fact resolves an enormous amount of otherwise inexplicable behaviour.</p>
+</div>
+
+<h2>Build your own stack</h2>
+
+<p>Rather than a list to obey, work out what you need. Tick what you actually want to do and watch the toolset grow — including the moment where ticking something adds <em>nothing</em>.</p>
+
+<div class="widget" data-stackbuilder></div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — The ladder, and why it goes in this order</span>
+  <p>Each rung is a genuinely new capability, and nothing on a higher rung is needed to understand a lower one. That ordering is the whole point of installing as you go.</p>
+  <div class="table-scroll wide" style="margin:0.7rem 0 0">
+    <table style="margin:0">
+      <thead><tr><th style="width:2rem"></th><th>Rung</th><th>What it buys you</th><th>When this weekend</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><code>php-cli</code></td><td>Run PHP at all — including <code>php -S</code>, a whole web server</td><td><strong>Now</strong></td></tr>
+        <tr><td>2</td><td><code>php-mbstring</code>, <code>php-curl</code>, <code>php-sqlite3</code></td><td>Real text, outbound HTTP, storage with no server</td><td>Saturday</td></tr>
+        <tr><td>3</td><td><code>mariadb-server</code> + <code>php-mysql</code></td><td>A shared database over a network</td><td>Sunday, Lesson 0016</td></tr>
+        <tr><td>4</td><td><code>composer</code> + <code>php-xml</code> + <code>php-zip</code></td><td>Other people's code — the whole ecosystem</td><td>After the bootcamp</td></tr>
+        <tr><td>5</td><td><code>nginx</code> + <code>php-fpm</code></td><td>Public traffic, TLS, concurrency, crash isolation</td><td>Optional, Lesson 0007</td></tr>
+        <tr><td>6</td><td><code>php-xdebug</code></td><td>Step debugging</td><td>When you're back in the course</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h2>Install checkpoint 1 — one package</h2>
+
+<p>This is everything you need for all of Friday and most of Saturday. Run it in your own terminal, since it needs a password prompt:</p>
+
+<pre><code>sudo apt update
+sudo apt install -y php-cli</code></pre>
+
+<p>Then interrogate what you just got, rather than trusting it:</p>
+
+<pre><code>php -v                  <span class="c"># version, and which SAPI (you'll see "cli")</span>
+which php               <span class="c"># where the binary landed</span>
+ls -lh $(which php)     <span class="c"># how big the entire language runtime is</span>
+php -m | head -30       <span class="c"># which extensions are loaded — no curl, no mysql yet</span>
+php -i | grep 'Loaded Configuration'   <span class="c"># which php.ini is in effect</span>
+
+php -r 'echo "the engine works\n";'    <span class="c"># -r runs code directly</span></code></pre>
+
+<p>Now prove the claim that made Apache unnecessary:</p>
+
+<pre><code>mkdir -p ~/websites/demo &amp;&amp; cd ~/websites/demo
+echo '&lt;h1&gt;Hello from &lt;?= PHP_VERSION ?&gt;&lt;/h1&gt;' &gt; index.php
+
+php -S localhost:8888</code></pre>
+
+<p>Open <code>http://localhost:8888</code>. <strong>That is a web server, and you installed one package.</strong> No Apache, no MySQL, no Perl, no control panel — and nothing about it is a toy: it is the same engine, reached through a different door.</p>
+
+<div class="callout warn">
+  <span class="label">What you did <em>not</em> get, and will notice</span>
+  <p><code>php -m</code> shows no <code>curl</code>, no <code>mysqli</code>, no <code>pdo_mysql</code>, no <code>mbstring</code>. That is correct and deliberate. When a lesson needs one, it will tell you which and why — and you will feel the specific thing that was missing, which is worth far more than having had it all along.</p>
+  <p>PDO's <em>core</em> is bundled, but its MySQL <em>driver</em> is not. So <code>new PDO('sqlite:…')</code> may work while <code>new PDO('mysql:…')</code> fails with "could not find driver". That message means exactly one thing: install the driver package.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l0">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "You want to build a dynamic website on your laptop. What is the minimum you must install?",
+      "options": [
+        "PHP alone — it includes a web server",
+        "PHP and a web server such as Apache",
+        "PHP, a web server, and a database",
+        "A bundled stack, to guarantee compatibility"
+      ],
+      "answer": 0,
+      "why": "<code>php -S localhost:8888</code> has been built into PHP since 5.4 in 2012. A database is only needed once data must survive the request, and a separate web server only matters in production. This one fact removes most of XAMPP's reason to exist for a learner."
+    },
+    {
+      "q": "<code>curl_init()</code> works in your terminal but fails in the browser. Why?",
+      "options": [
+        "CLI and FPM are separate SAPIs with separate php.ini files",
+        "The browser cannot make outbound HTTP requests",
+        "The extension must be recompiled for web use",
+        "FPM runs as a user without network permission"
+      ],
+      "answer": 0,
+      "why": "Same engine, different front doors — and Debian/Ubuntu give each SAPI its own config directory: <code>/etc/php/8.5/cli/php.ini</code> versus <code>/etc/php/8.5/fpm/php.ini</code>. You enabled it for one and not the other. This is behind a large share of \"works here, not there\" confusion."
+    },
+    {
+      "q": "What is the second P in XAMPP?",
+      "options": [
+        "Perl — a language you will never use",
+        "PostgreSQL — an alternative database",
+        "phpMyAdmin — the database web UI",
+        "Python — for auxiliary scripting"
+      ],
+      "answer": 0,
+      "why": "Perl. It is there because XAMPP dates from 2002, when Perl was the dominant CGI language. It is the clearest single piece of evidence that the bundle is a historical artefact rather than a considered list of what PHP needs."
+    },
+    {
+      "q": "You get \"could not find driver\" from <code>new PDO('mysql:…')</code>. What is wrong?",
+      "options": [
+        "The MySQL driver extension is not installed",
+        "The MySQL server process is not running",
+        "The DSN string has a syntax error in it",
+        "The credentials were rejected by the server"
+      ],
+      "answer": 0,
+      "why": "PDO's core ships with PHP; each database driver is a separate extension. \"Could not find driver\" is about your <em>PHP install</em>, not about the database — nothing has been contacted yet. A stopped server gives \"connection refused\"; bad credentials give \"access denied\". Three different messages, three different fixes."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — this is how you should read any stack, forever</span>
+  <p>You will meet more bundles: <strong>LAMP</strong>, <strong>LEMP</strong> (nginx instead of Apache — E for "engine-x"), <strong>MEAN</strong>, <strong>MERN</strong>, Laravel <strong>Sail</strong>, <strong>Herd</strong>, <strong>Valet</strong>, Docker Compose files with six services.</p>
+  <p>Ask the same three questions every time: <strong>What problem was this bundle solving? Is that still my problem? Which pieces do I actually use?</strong></p>
+  <p>Sometimes the answer is "all of them" and the bundle is right — a Docker Compose file for a team of eight is a genuinely good idea. But it should be a conclusion you reached, not a default you inherited. That is the difference between operating a stack and understanding one, and it is the whole reason this lesson exists.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Your younger self is about to install XAMPP for a school PHP assignment. Explain, in under a minute, what each letter is, what they should install instead, and why.",
+  "answer": "<p><strong>X</strong> is not a tool — it just means cross-platform. <strong>A</strong> is Apache, a web server. <strong>M</strong> is MySQL, a database server. <strong>P</strong> is PHP, the language runtime. The second <strong>P</strong> is Perl, an entirely different language that is there for historical reasons from 2002.</p><p><strong>Install instead:</strong> <code>php-cli</code>. One package, about 12 MB. PHP has included its own web server since 2012, so <code>php -S localhost:8888</code> replaces Apache entirely for development. If the assignment needs storage, add <code>php-sqlite3</code> — a database that is a library rather than a server, with the same SQL and no process, port or password to manage. Only add MySQL if something specifically requires MySQL.</p><p><strong>Why it matters:</strong> not because bundles are bad, but because you cannot debug what you cannot describe. When something breaks in a stack you installed as one opaque blob, you have no model to reason with — and \"reinstall XAMPP\" is not a debugging strategy.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.php.net/manual/en/features.commandline.webserver.php">PHP Manual — Built-in web server</a>. Short, and note its own warning that it is not for public networks — which is Lesson 0007's subject.
+  <br><br>
+  Then <a href="https://www.php.net/manual/en/install.unix.debian.php">installing on Debian/Ubuntu</a> for the package layout, and <a href="https://www.sqlite.org/whentouse.html">SQLite's "When To Use"</a> — an unusually honest document about when you do and don't need a database server.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0000" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Good ones right now: <em>"show me what's inside the php binary with <code>ldd</code> and <code>strings</code>"</em>, <em>"what exactly does a Docker Compose file for Laravel contain and do I need any of it?"</em>, or — genuinely worth asking — <em>"what would break if I deleted an extension .so file?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="../START-HERE.html">← Syllabus</a>
+    <a href="0001-bytes-programs-processes.html">0001 — Bytes, Programs, Processes →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script src="../assets/stackbuilder.js"></script>

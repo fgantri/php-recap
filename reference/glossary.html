@@ -1,0 +1,188 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary — Low-Level Web Development</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Reference</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Glossary</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="#" onclick="window.print();return false">Print</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Glossary</h1>
+<p class="subtitle">Every term this course uses, defined once. Where a word means different things in different worlds, both meanings are given — that ambiguity is usually the reason the word was confusing.</p>
+
+<div class="widget" style="margin-top:1.5rem">
+  <input type="text" id="filter" placeholder="Filter terms…" spellcheck="false" autofocus>
+  <div style="font-family:var(--sans);font-size:0.75rem;color:var(--ink-faint);margin-top:0.4rem" id="count"></div>
+</div>
+
+<div id="terms">
+
+<h2>The machine</h2>
+<dl>
+  <dt>Process</dt><dd>A running instance of a program, with its own memory, file-descriptor table, working directory, environment and PID. Isolation between processes is enforced by the kernel. <em>Lesson 0001.</em></dd>
+  <dt>fork / exec</dt><dd><code>fork()</code> clones the current process; <code>exec()</code> replaces a process's memory with a different program while keeping its PID and open descriptors. Every command you run is a fork followed by an exec.</dd>
+  <dt>File descriptor</dt><dd>A small integer indexing the kernel's table of things this process has open. 0, 1 and 2 are stdin, stdout and stderr; files, pipes and sockets get the rest.</dd>
+  <dt>Environment</dt><dd>(1) A set of key–value strings attached to a process, inherited as a <em>copy</em> by children. (2) The software installed on your machine. (3) A deployment context — local, staging, production. The course uses all three; context disambiguates.</dd>
+  <dt>PATH</dt><dd>A colon-separated list of directories the shell searches, in order, for an executable matching a command name. First match wins. Version managers work purely by reordering it.</dd>
+  <dt>Builtin</dt><dd>A command implemented inside the shell rather than as a file on disk. <code>cd</code>, <code>export</code> and <code>source</code> must be builtins because a child process cannot change its parent's state.</dd>
+  <dt>Exit code</dt><dd>The integer a process returns when it dies. Zero means success; non-zero values distinguish failures. <code>&amp;&amp;</code>, <code>||</code> and every CI pipeline are built on it.</dd>
+  <dt>Inode</dt><dd>The structure holding everything about a file <em>except</em> its name — permissions, owner, size, timestamps, link count, and pointers to the data blocks. Names live in directories and point at inodes.</dd>
+  <dt>Hard link</dt><dd>An additional directory entry pointing at an existing inode. No name is "the original"; the data survives until the link count reaches zero <em>and</em> no process has it open.</dd>
+  <dt>Symbolic link</dt><dd>A small file whose contents are a path. Resolving it restarts the lookup. Deleting the target leaves a dangling link. The basis of atomic symlink deployments.</dd>
+  <dt>Document root</dt><dd>The directory a web server maps request paths into. Files above it are unreachable by URL, which is why frameworks put only <code>public/</code> inside it. <em>Lesson 0002, 0007.</em></dd>
+  <dt>Path traversal</dt><dd>Escaping the document root using <code>..</code> or its encodings. Defence: resolve with <code>realpath()</code> and verify the result still begins with the root — never string-strip <code>..</code>.</dd>
+</dl>
+
+<h2>The network</h2>
+<dl>
+  <dt>Socket</dt><dd>A file descriptor representing a network endpoint. Read and written with the same calls as a file.</dd>
+  <dt>Port</dt><dd>A number 0–65535 identifying which listening program on a machine a connection is for. Below 1024 requires root. <em>Lesson 0004.</em></dd>
+  <dt>Four-tuple</dt><dd>(source IP, source port, destination IP, destination port) — what actually identifies a TCP connection, and why one server port can serve thousands of clients.</dd>
+  <dt>Accept loop</dt><dd>The structure of every TCP server: <code>socket → bind → listen</code>, then repeatedly <code>accept</code>. <code>accept()</code> returns a <em>new</em> socket per connection; the listening socket never carries data.</dd>
+  <dt>Backlog</dt><dd>The kernel's queue of connections accepted by the OS but not yet by your program. Fixed size; when full, new connections are refused.</dd>
+  <dt>Head-of-line blocking</dt><dd>One slow item delaying everything behind it. Visible in a single-worker server, and the problem HTTP/2 multiplexing was designed to reduce.</dd>
+  <dt>Event loop</dt><dd>One process handling many sockets by asking the kernel which are ready (<code>epoll</code>) and servicing only those. nginx, Node.js, Cloudflare Workers. Excellent for I/O, fatal if you block it.</dd>
+  <dt>HTTP</dt><dd>A text protocol: request line, headers, blank line, optional body. Lines end <code>\r\n</code>. Stateless by design. <em>Lesson 0005.</em></dd>
+  <dt>Idempotent</dt><dd>Doing it N times leaves the same state as doing it once. What makes automatic retry safe. <code>GET</code>, <code>PUT</code> and <code>DELETE</code> promise it; <code>POST</code> does not.</dd>
+  <dt>Safe (method)</dt><dd>Changes nothing on the server. <code>GET</code> and <code>HEAD</code>. Breaking this promise is how crawlers delete your data.</dd>
+  <dt>Stateless</dt><dd>Each request is self-contained and the server remembers nothing between them. The constraint that makes load balancing, CDNs and edge compute possible.</dd>
+  <dt>TTL</dt><dd>How long a cached DNS record may be reused. Why DNS changes appear to take hours — nothing is "propagating"; old answers are expiring.</dd>
+  <dt>CGI / FastCGI / PHP-FPM</dt><dd>CGI (1993) spawned a process per request and passed the request as environment variables. FastCGI keeps processes alive over a persistent socket. PHP-FPM is PHP's FastCGI process manager. <code>$_SERVER</code>'s key names are CGI's, unchanged. <em>Lesson 0007.</em></dd>
+</dl>
+
+<h2>PHP the engine</h2>
+<dl>
+  <dt>Opcode</dt><dd>One instruction in the array PHP compiles your source into. The VM executes these; the CPU never sees your PHP. <em>Lesson 0008.</em></dd>
+  <dt>OPcache</dt><dd>Shared-memory cache of compiled opcodes, skipping lex/parse/compile on subsequent requests. With <code>validate_timestamps=0</code> it must be reset on deploy.</dd>
+  <dt>Shared-nothing</dt><dd>Every request starts from zero state. The process may be reused; your program's world is not. Why sessions and caches exist, and what serverless rediscovered.</dd>
+  <dt>Parse error</dt><dd>Failure during phase 2, before <em>any</em> execution — so the whole page is blank, including output from correct lines above the mistake.</dd>
+  <dt>Runtime error</dt><dd>Failure during execution. Output produced before the failure still reaches the browser, which is why a partially rendered page points here.</dd>
+  <dt>zval</dt><dd>PHP's variable container: a type tag plus a value, or a pointer plus a reference count for strings, arrays and objects. <em>Lesson 0009.</em></dd>
+  <dt>Copy-on-write</dt><dd>Assignment copies a pointer and increments a refcount; the data is duplicated only when one holder writes. Why passing large arrays is free until someone mutates.</dd>
+  <dt>Handle (object)</dt><dd>What an object variable holds — an identifier into the object store. Copied by value, but both copies designate one object. Not "by reference", though it is often miscalled that.</dd>
+  <dt>Ordered hash map</dt><dd>PHP's single array type, serving as both list and dictionary, preserving insertion order. <em>Lesson 0011.</em></dd>
+  <dt>Packed array</dt><dd>Optimised layout used when keys are exactly 0..n−1: a flat contiguous block with no hashing. Broken by gaps; restored by <code>array_values()</code>.</dd>
+  <dt>Truthy / falsy</dt><dd>The eight falsy values are <code>false</code>, <code>0</code>, <code>0.0</code>, <code>-0.0</code>, <code>''</code>, <code>'0'</code>, <code>[]</code>, <code>null</code>. Everything else is truthy. <em>Lesson 0010.</em></dd>
+  <dt>Call stack / frame</dt><dd>The structure tracking where execution is. Each call pushes a frame holding parameters and locals; <code>return</code> pops it. A stack trace is a snapshot of the open frames.</dd>
+  <dt>Closure</dt><dd>An anonymous function that captures variables from its defining scope. PHP requires explicit capture with <code>use</code> (by value unless you write <code>&amp;</code>); arrow functions capture automatically, by value.</dd>
+  <dt>Higher-order function</dt><dd>One that takes or returns a function. Owns the <em>mechanism</em> while the caller supplies the <em>policy</em>. Middleware, hooks, event listeners and route handlers are all this.</dd>
+  <dt>Output buffering</dt><dd><code>ob_start()</code> / <code>ob_get_clean()</code> — intercepting output so it can be captured as a string. The mechanism every PHP template engine is built on. <em>Lesson 0013.</em></dd>
+  <dt>Superglobal</dt><dd>A PHP-provided array visible in every scope: <code>$_SERVER</code>, <code>$_GET</code>, <code>$_POST</code>, <code>$_SESSION</code>, <code>$_COOKIE</code>, <code>$_FILES</code>, <code>$_ENV</code>, <code>$_REQUEST</code>. All but the last two are filled from client data — treat as hostile.</dd>
+  <dt>Throwable</dt><dd>The interface above both <code>Error</code> (engine problems) and <code>Exception</code> (your problems). They are siblings — <code>catch (Exception)</code> does not catch a <code>TypeError</code>.</dd>
+</dl>
+
+<h2>Structure and patterns</h2>
+<dl>
+  <dt>Front controller</dt><dd>One entry point handling every request, which bootstraps and then dispatches. <code>public/index.php</code> in Laravel and Symfony. Made possible by the server's <code>try_files</code> fallback. <em>Lesson 0014.</em></dd>
+  <dt>Router / dispatcher</dt><dd>Matches the request path (and method) against registered patterns and hands off to a handler. Patterns compile to anchored regular expressions with named capture groups.</dd>
+  <dt>Controller</dt><dd>Accepts a request, gathers data, makes decisions, and hands assembled data to a view. Contains logic, not markup.</dd>
+  <dt>View / template</dt><dd>Renders a response from data it was given. Contains markup, and no decisions. Keeping it "dumb" is the discipline that makes the separation pay.</dd>
+  <dt>Partial</dt><dd>A reusable fragment of a view. Blade's <code>@include</code>, Twig's <code>{% include %}</code>.</dd>
+  <dt>Layout</dt><dd>A shell template that a page's rendered content is injected into. Cleaner than head/footer partials because tags open and close in one file.</dd>
+  <dt>Bootstrap</dt><dd>The startup sequence: helpers → config → shared services → routes → dispatch. Every framework's entry point is these five steps.</dd>
+  <dt>Middleware</dt><dd>A layer wrapping the request/response cycle, receiving the request and the next handler. Structurally a chain of callbacks.</dd>
+  <dt>Dependency injection</dt><dd>A component declares what it needs (usually as constructor parameters) and a <em>container</em> supplies it — instead of reaching for shared globals. What makes code testable.</dd>
+  <dt>DRY</dt><dd>Don't Repeat Yourself: one authoritative representation per piece of knowledge. Counter-principle: extracting before you have seen enough cases produces bad abstractions. Duplicate once; extract on the third.</dd>
+  <dt>Refactoring</dt><dd>Changing structure without changing observable behaviour. Not an indulgence — the main activity after "it works".</dd>
+  <dt>Magic number</dt><dd>A bare literal whose meaning is implicit. Fixed by a named variable or a class constant.</dd>
+</dl>
+
+<h2>Data</h2>
+<dl>
+  <dt>Primary key</dt><dd>Uniquely identifies a row; never null, never reused. Usually an <code>AUTO_INCREMENT</code> integer. What relationships are built on.</dd>
+  <dt>Foreign key</dt><dd>A column holding another table's primary key. With a constraint declared, the database refuses writes that would break the reference.</dd>
+  <dt>Referential integrity</dt><dd>The guarantee that every foreign key points at a row that exists. Enforced by the database, which no application bug can bypass.</dd>
+  <dt>Orphan record</dt><dd>A row whose foreign key points at something deleted. Damage is quiet: joins silently drop rows, reports undercount.</dd>
+  <dt>Cascade</dt><dd>What happens to dependent rows when a parent is deleted: <code>CASCADE</code>, <code>RESTRICT</code>, <code>SET NULL</code>, <code>SET DEFAULT</code>. A modelling decision, not a default.</dd>
+  <dt>Index</dt><dd>A sorted structure (usually a B-tree) over one or more columns, with pointers back to rows. Faster reads, slower writes, more disk. <em>Lesson 0018.</em></dd>
+  <dt>Full table scan</dt><dd>Reading every row because no usable index exists. Fine on 100 rows, fatal on 10 million.</dd>
+  <dt>Declarative</dt><dd>You describe the result you want; the engine decides how. SQL is declarative; PHP is imperative. Why you never write a loop over rows in SQL.</dd>
+  <dt>DSN</dt><dd>Data Source Name — one string describing how to reach a database. <code>mysql:host=localhost;port=3306;dbname=app;charset=utf8mb4</code>.</dd>
+  <dt>Prepared statement</dt><dd>SQL sent to the database for parsing <em>separately</em> from its parameter values, so values can never be read as structure. The defence against SQL injection. <em>Lesson 0020.</em></dd>
+  <dt>Transaction</dt><dd>A group of changes that either all apply or none do.</dd>
+  <dt>Soft delete</dt><dd>Marking a row deleted with a timestamp instead of removing it. Reversible and audit-friendly; every query must then remember to exclude them.</dd>
+  <dt>utf8mb4</dt><dd>MySQL's real UTF-8. Its <code>utf8</code> stores only three bytes per character and cannot hold emoji or some CJK text. Always specify <code>utf8mb4</code>.</dd>
+</dl>
+
+<h2>Security</h2>
+<dl>
+  <dt>Injection</dt><dd>The general failure where data crosses into a position where it is interpreted as code. SQL injection, XSS, command injection, path traversal and header injection are all instances.</dd>
+  <dt>SQL injection</dt><dd>User input interpolated into a query, changing its meaning. Defence: prepared statements — never escaping, never sanitising.</dd>
+  <dt>XSS</dt><dd>User input rendered as HTML, so it becomes markup or script running with the viewer's privileges. Defence: escape on output, per context.</dd>
+  <dt>CSRF</dt><dd>A third-party site causing an authenticated user's browser to submit a request. Defence: an unpredictable token bound to the session, plus <code>SameSite</code> cookies. <em>Lesson 0023.</em></dd>
+  <dt>Authentication</dt><dd><em>Who are you?</em> Login, sessions, tokens, password verification. Status code <code>401</code>.</dd>
+  <dt>Authorization</dt><dd><em>Are you allowed to do this?</em> Ownership, roles, permissions. Status code <code>403</code>.</dd>
+  <dt>IDOR</dt><dd>Insecure Direct Object Reference — exposing a record's id and not verifying the requester may have it. Change the number, read someone else's data. Fixed by checking ownership on every request, never by hiding the id.</dd>
+  <dt>Allowlist</dt><dd>Permitting only known-good values. Always preferable to a denylist, which fails against anything its author did not anticipate.</dd>
+  <dt>Information disclosure</dt><dd>Revealing more than intended — including that a record <em>exists</em>. Why GitHub returns 404, not 403, for private repositories you cannot see.</dd>
+</dl>
+
+<h2>The wider ecosystem</h2>
+<dl>
+  <dt>SSR</dt><dd>Server-Side Rendering — HTML built per request on the server. What PHP has always done.</dd>
+  <dt>SSG</dt><dd>Static Site Generation — HTML built at deploy time and served as files.</dd>
+  <dt>CSR</dt><dd>Client-Side Rendering — the server sends a shell and JavaScript builds the DOM in the browser.</dd>
+  <dt>ISR</dt><dd>Incremental Static Regeneration — static pages regenerated in the background after a set interval. Vercel's signature feature.</dd>
+  <dt>Hydration</dt><dd>Attaching JavaScript behaviour to server-rendered HTML in the browser, so the markup becomes interactive without being rebuilt.</dd>
+  <dt>Edge</dt><dd>Compute running in many locations physically near users, rather than in one region. Removes round trips, which usually beats optimising server time.</dd>
+  <dt>CDN</dt><dd>A network of caching servers near users. Serves cacheable responses without touching your origin at all.</dd>
+  <dt>Bundler</dt><dd>A tool producing browser-runnable artefacts from source the browser cannot run. Exists because JavaScript lost the property PHP still has: no artefact between source and execution.</dd>
+  <dt>Tree-shaking</dt><dd>Removing unused exports from a bundle. Possible only because JavaScript's <code>import</code> is static — which is exactly what PHP's runtime <code>require</code> gives up.</dd>
+  <dt>Hooks (WordPress)</dt><dd>Named events with registered callbacks — <code>add_action</code>, <code>add_filter</code>. WordPress's extensibility model, and an instance of higher-order functions.</dd>
+  <dt>Active Record vs Data Mapper</dt><dd>Two ORM philosophies. Active Record: the model knows how to persist itself (Eloquent). Data Mapper: a separate layer moves data between objects and tables (Doctrine, and therefore Shopware).</dd>
+  <dt>PSR</dt><dd>PHP Standards Recommendations from PHP-FIG. PSR-4 (autoloading) is why class files are named after their class; PSR-7 defines immutable HTTP message objects; PSR-12 is code style.</dd>
+  <dt>Twelve-Factor</dt><dd>A set of principles for deployable apps — notably config in the environment, and stateless processes. Explains much of Heroku, Vercel and Cloudflare's design.</dd>
+</dl>
+
+</div>
+
+<footer class="lesson-foot">
+  <div class="nextprev">
+    <a href="../START-HERE.html">← Syllabus</a>
+    <a href="http-cheatsheet.html">HTTP cheat sheet →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const input = document.getElementById("filter");
+    const count = document.getElementById("count");
+    const entries = [...document.querySelectorAll("#terms dt")].map((dt) => ({
+      dt, dd: dt.nextElementSibling, text: (dt.textContent + " " + dt.nextElementSibling.textContent).toLowerCase(),
+    }));
+
+    const paint = () => {
+      const needle = input.value.trim().toLowerCase();
+      let shown = 0;
+      for (const entry of entries) {
+        const hit = !needle || entry.text.includes(needle);
+        entry.dt.style.display = hit ? "" : "none";
+        entry.dd.style.display = hit ? "" : "none";
+        shown += hit ? 1 : 0;
+      }
+      for (const section of document.querySelectorAll("#terms h2")) {
+        const list = section.nextElementSibling;
+        const any = [...list.querySelectorAll("dt")].some((dt) => dt.style.display !== "none");
+        section.style.display = any ? "" : "none";
+        list.style.display = any ? "" : "none";
+      }
+      count.textContent = needle ? `${shown} of ${entries.length} terms` : `${entries.length} terms`;
+    };
+
+    input.addEventListener("input", paint);
+    paint();
+  })();
+</script>

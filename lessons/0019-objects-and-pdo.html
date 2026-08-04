@@ -1,0 +1,284 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0019 — Objects, Classes, PDO</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0019</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Objects, Classes, PDO</h1>
+<p class="subtitle">A class is a blueprint; an instance is a house built from it. Your course said that well. What it left out is the modern syntax — and three PDO settings that decide whether your authorization checks work.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: blueprint vs instance, and a correctly configured connection</span></div>
+
+<h2>The class, written the way you'd write it in 2026</h2>
+
+<p>Your course's <code>Person</code> class is correct and dated. Here is the same idea with everything PHP has added since:</p>
+
+<div class="grid two">
+  <div class="card">
+    <h4>The 2015 way</h4>
+<pre style="margin:0;font-size:0.72rem"><code>class Note
+{
+    public $id;
+    public $body;
+
+    public function __construct($id, $body)
+    {
+        $this-&gt;id = $id;
+        $this-&gt;body = $body;
+    }
+}</code></pre>
+  </div>
+  <div class="card">
+    <h4>The 2026 way</h4>
+<pre style="margin:0;font-size:0.72rem"><code>final class Note
+{
+    public function __construct(
+        public readonly int $id,
+        public readonly string $body,
+    ) {}
+}</code></pre>
+  </div>
+</div>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Feature</th><th>Since</th><th>Buys you</th></tr></thead>
+  <tbody>
+    <tr><td>Constructor promotion</td><td>8.0</td><td>Declare, type and assign a property in one place</td></tr>
+    <tr><td><code>readonly</code></td><td>8.1</td><td>Assignable once, in the constructor. Immutability with no boilerplate</td></tr>
+    <tr><td><code>final</code></td><td>5.0</td><td>Nobody can subclass and change behaviour under you</td></tr>
+    <tr><td>Typed properties</td><td>7.4</td><td>Wrong types fail at assignment, not three frames later</td></tr>
+    <tr><td>Named arguments</td><td>8.0</td><td><code>new Note(id: 1, body: 'x')</code> — order-free, self-documenting</td></tr>
+    <tr><td>Enums</td><td>8.1</td><td>A fixed set of values the type system enforces</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Why visibility exists, stated usefully</span>
+  <p>Your course said <code>public</code> everywhere is fine while learning, and flagged it as a temporary simplification. Here is the sharp version of why:</p>
+  <p><strong>Every public property is a permanent promise.</strong> Once outside code can read <code>$note-&gt;body</code>, you can never rename it, change its type, or compute it differently without breaking every caller. A class where everything is public has no internals — its entire shape is its API.</p>
+  <p><code>private</code> is not about secrecy. It is about <strong>reserving the right to change your mind.</strong> That is the whole of encapsulation, and it is the same argument as the document root in Lesson 0007: expose a deliberate, small surface.</p>
+</div>
+
+<h3>Enums, which your course predates</h3>
+
+<pre><code><span class="k">enum</span> NoteStatus: <span class="k">string</span>
+{
+    <span class="k">case</span> Draft     = <span class="s">'draft'</span>;
+    <span class="k">case</span> Published = <span class="s">'published'</span>;
+    <span class="k">case</span> Archived  = <span class="s">'archived'</span>;
+
+    <span class="k">public function</span> isVisible(): <span class="k">bool</span>
+    {
+        <span class="k">return</span> <span class="n">$this</span> === <span class="k">self</span>::Published;
+    }
+}
+
+<span class="n">$status</span> = NoteStatus::from(<span class="n">$row</span>[<span class="s">'status'</span>]);   <span class="c">// throws on an unknown value</span>
+<span class="n">$status</span> = NoteStatus::tryFrom(<span class="n">$bad</span>) ?? NoteStatus::Draft;</code></pre>
+
+<p>Compare with <code>const STATUS_DRAFT = 'draft'</code>: a constant is a suggestion — nothing stops <code>$note->status = 'drft'</code>. An enum is a <em>type</em>, so a function declaring <code>NoteStatus $status</code> cannot receive anything else. Use enums for every fixed set of values.</p>
+
+<h2>Connecting to MySQL</h2>
+
+<pre><code><span class="n">$dsn</span> = <span class="s">'mysql:host=localhost;port=3306;dbname=myapp;charset=utf8mb4'</span>;</code></pre>
+
+<p>Key–value pairs joined by semicolons — the same shape as a query string, a header set, an environment. <code>charset=utf8mb4</code> is not optional: MySQL's <code>utf8</code> stores three bytes per character and silently mangles emoji and some CJK text.</p>
+
+<h2>The three options that are not optional</h2>
+
+<pre><code><span class="n">$pdo</span> = <span class="k">new</span> PDO(<span class="n">$dsn</span>, <span class="n">$user</span>, <span class="n">$pass</span>, [
+    PDO::ATTR_ERRMODE            =&gt; PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE =&gt; PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES   =&gt; <span class="k">false</span>,
+]);</code></pre>
+
+<div class="callout danger">
+  <span class="label">What each one prevents</span>
+  <p><strong><code>ERRMODE_EXCEPTION</code></strong> — without it, PDO's default is to fail <em>silently</em>: a broken query returns <code>false</code> and your code carries on with nonsense. This single line converts an entire class of silent wrongness into loud, catchable failure.</p>
+  <p><strong><code>FETCH_ASSOC</code></strong> — the default returns every value twice, once by column name and once by numeric index. Your course noticed this and fixed it per-call; setting it once on the connection is better.</p>
+  <p><strong><code>EMULATE_PREPARES =&gt; false</code></strong> — the important one. With emulation on (the default for MySQL), PDO builds the query string itself and <strong>every column comes back as a string</strong>. So <code>$note['user_id']</code> is <code>'1'</code>, not <code>1</code>, and your course's Chapter 14 ownership check —</p>
+  <pre style="margin:0.6rem 0"><code>if ($note['user_id'] !== $currentUserId) { abort(403); }</code></pre>
+  <p>— is <code>'1' !== 1</code>, which is <strong>true</strong>. The rightful owner gets a 403. Turn emulation off and MySQL prepares the statement for real, returning native integers. (If you must leave it on, cast: <code>(int) $note['user_id']</code>.)</p>
+</div>
+
+<h2>Prepare, execute, fetch</h2>
+
+<pre><code><span class="n">$statement</span> = <span class="n">$pdo</span>-&gt;prepare(<span class="s">'SELECT * FROM notes WHERE user_id = :uid'</span>);
+<span class="n">$statement</span>-&gt;execute([<span class="s">'uid'</span> =&gt; <span class="n">$userId</span>]);
+
+<span class="n">$rows</span> = <span class="n">$statement</span>-&gt;fetchAll();   <span class="c">// array of rows; [] when none</span>
+<span class="n">$row</span>  = <span class="n">$statement</span>-&gt;fetch();      <span class="c">// ONE row, or FALSE when none</span></code></pre>
+
+<p>The three-step split looks like bureaucracy. Lesson 0020 shows it is the single most important security mechanism you will use.</p>
+
+<div class="callout warn">
+  <span class="label"><code>fetch()</code> returns <code>false</code>, and that's a type change</span>
+  <p>Your course hit this in Chapter 14: a query for a note that doesn't exist returns <code>false</code>, not an empty array. Dynamic typing lets that boolean travel until a view tries to use it as an array, and the error surfaces far from the cause.</p>
+  <p>Handle it at the point it occurs: <code>if (! $note) { abort(404); }</code> — immediately after the fetch, before anything else touches it. Errors that travel before surfacing are the expensive ones.</p>
+</div>
+
+<h2>The Database class</h2>
+
+<div class="filename">src/Database.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+declare(strict_types=1);
+
+<span class="k">final class</span> Database
+{
+    <span class="k">private</span> PDO <span class="n">$connection</span>;
+
+    <span class="k">public function</span> __construct(<span class="k">array</span> <span class="n">$config</span>, <span class="k">string</span> <span class="n">$user</span> = <span class="s">'root'</span>, <span class="k">string</span> <span class="n">$pass</span> = <span class="s">''</span>)
+    {
+        <span class="n">$dsn</span> = <span class="s">'mysql:'</span> . http_build_query(<span class="n">$config</span>, <span class="s">''</span>, <span class="s">';'</span>);
+
+        <span class="k">try</span> {
+            <span class="n">$this</span>-&gt;connection = <span class="k">new</span> PDO(<span class="n">$dsn</span>, <span class="n">$user</span>, <span class="n">$pass</span>, [
+                PDO::ATTR_ERRMODE            =&gt; PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE =&gt; PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   =&gt; <span class="k">false</span>,
+            ]);
+        } <span class="k">catch</span> (PDOException <span class="n">$e</span>) {
+            <span class="c">// the message can contain the password — never let it reach the user</span>
+            error_log(<span class="s">'DB connection failed: '</span> . <span class="n">$e</span>-&gt;getMessage());
+            <span class="k">throw new</span> RuntimeException(<span class="s">'Database unavailable'</span>, 0, <span class="n">$e</span>);
+        }
+    }
+
+    <span class="k">public function</span> query(<span class="k">string</span> <span class="n">$sql</span>, <span class="k">array</span> <span class="n">$params</span> = []): PDOStatement
+    {
+        <span class="n">$statement</span> = <span class="n">$this</span>-&gt;connection-&gt;prepare(<span class="n">$sql</span>);
+        <span class="n">$statement</span>-&gt;execute(<span class="n">$params</span>);
+
+        <span class="k">return</span> <span class="n">$statement</span>;
+    }
+}</code></pre>
+
+<p>Three decisions worth naming. The connection is built <strong>once, in the constructor</strong> — your course's first version opened one per call, which is expensive under load. <code>query()</code> returns the <strong>statement</strong>, not results, so the caller chooses <code>fetch</code> or <code>fetchAll</code>. And <code>$connection</code> is <strong>private</strong>: nothing outside can bypass <code>query()</code> and issue an unprepared statement.</p>
+
+<div class="callout foundation">
+  <span class="label">Foundation — <code>__construct</code> makes invalid objects impossible</span>
+  <p>Because the connection is established in the constructor, <strong>no <code>Database</code> object can exist in a half-initialised state.</strong> If construction fails, you get an exception rather than an object that will fail later, somewhere else.</p>
+  <p>That property — <em>an object is valid from the moment it exists</em> — is worth a great deal, and it is the main argument for doing real work in constructors rather than in an <code>init()</code> method someone might forget to call.</p>
+</div>
+
+<h2>Config, pushed outward</h2>
+
+<div class="filename">config.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+<span class="k">return</span> [
+    <span class="s">'database'</span> =&gt; [
+        <span class="s">'host'</span>    =&gt; <span class="n">$_ENV</span>[<span class="s">'DB_HOST'</span>] ?? <span class="s">'localhost'</span>,
+        <span class="s">'port'</span>    =&gt; <span class="n">$_ENV</span>[<span class="s">'DB_PORT'</span>] ?? 3306,
+        <span class="s">'dbname'</span>  =&gt; <span class="n">$_ENV</span>[<span class="s">'DB_NAME'</span>] ?? <span class="s">'myapp'</span>,
+        <span class="s">'charset'</span> =&gt; <span class="s">'utf8mb4'</span>,
+    ],
+];</code></pre>
+
+<p>A required file can <code>return</code> a value — <code>$config = require 'config.php';</code>. That is exactly how Laravel's <code>config/</code> directory works, and now that layout is legible on sight.</p>
+
+<p>The progression your course named is worth memorising as a chain: <strong>hardcoded value → constructor parameter → config file → environment variable.</strong> Each step pushes the value further from the code and closer to the deployment. That is <a href="https://12factor.net/config">Twelve-Factor</a> factor III, and it is why <code>.env</code> exists.</p>
+
+<div class="widget" data-quiz data-seed="l19">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Your ownership check <code>$note['user_id'] !== $currentUserId</code> rejects the rightful owner. Most likely cause?",
+      "options": [
+        "Emulated prepares are returning the column as a string",
+        "The session stored the user id under a different key",
+        "The foreign key constraint changed the column type",
+        "FETCH_ASSOC returns values in an unexpected order"
+      ],
+      "answer": 0,
+      "why": "With <code>ATTR_EMULATE_PREPARES</code> left on (MySQL's default), every column comes back as a string, so <code>'1' !== 1</code> is true. Set it to <code>false</code> for native types, or cast at the boundary. This is a real vulnerability class, not a cosmetic issue."
+    },
+    {
+      "q": "Why establish the PDO connection in the constructor rather than inside <code>query()</code>?",
+      "options": [
+        "One connection per object, not one per query",
+        "Constructors are executed faster than methods",
+        "PDO requires construction-time initialisation",
+        "It allows the connection property to be public"
+      ],
+      "answer": 0,
+      "why": "Opening a connection is expensive, and a page may run dozens of queries. Building it once in the constructor also guarantees no <code>Database</code> object exists half-initialised — if it can't connect, you get an exception instead of an object that fails later."
+    },
+    {
+      "q": "What does <code>ATTR_ERRMODE => ERRMODE_EXCEPTION</code> change?",
+      "options": [
+        "Failed queries throw instead of returning false",
+        "SQL syntax is validated before it is sent",
+        "Exceptions include the full query and parameters",
+        "Connection retries happen automatically on failure"
+      ],
+      "answer": 0,
+      "why": "PDO's default is to fail silently — a broken query returns <code>false</code> and execution continues with nonsense. Throwing converts that into a loud, catchable failure at the point of the problem."
+    },
+    {
+      "q": "Why is an enum better than <code>const STATUS_DRAFT = 'draft'</code> for a fixed value set?",
+      "options": [
+        "An enum is a type the language enforces",
+        "Enums are stored more compactly in memory",
+        "Constants cannot hold string values reliably",
+        "Enums are automatically persisted by PDO"
+      ],
+      "answer": 0,
+      "why": "A constant is a suggestion — nothing stops <code>$note->status = 'drft'</code>. An enum is a type, so a parameter declared <code>NoteStatus $status</code> cannot receive anything else, and <code>from()</code> throws on an unknown value at the boundary."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Name the three PDO options every connection should set, and for each say precisely what goes wrong without it. Then explain why <code>query()</code> should return the statement rather than the rows.",
+  "answer": "<p><strong><code>ATTR_ERRMODE => ERRMODE_EXCEPTION</code></strong> — without it a failed query returns <code>false</code> silently and execution continues on nonsense data.</p><p><strong><code>ATTR_DEFAULT_FETCH_MODE => FETCH_ASSOC</code></strong> — without it every row is duplicated, once under the column name and once under a numeric index, doubling memory and cluttering every dump.</p><p><strong><code>ATTR_EMULATE_PREPARES => false</code></strong> — without it PDO builds the statement itself and returns every column as a string, so strict comparisons against integers fail. That silently breaks ownership checks and hands 403s to legitimate users.</p><p><strong>Return the statement</strong> because the caller knows whether it wants one row or many. Hardcoding <code>fetchAll()</code> means a single-row query returns an array containing one array, forcing <code>$post[0]['title']</code> — awkward, and a source of confusing failures further downstream.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://phpdelusions.net/pdo">PHP Delusions — The only proper PDO tutorial</a>. Blunt, opinionated, and correct; it exists specifically because most PDO tutorials teach the emulated-prepares default without mentioning what it costs.
+  <br><br>
+  Then <a href="https://www.php.net/manual/en/language.enumerations.php">the PHP manual on enumerations</a>, which is short and worth reading in full.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0019" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask: <em>"show me emulated prepares breaking a real ownership check"</em> — a ten-line demo, and it makes the abstract concrete. Or: <em>"when should I use an interface rather than a final class?"</em>, which is the natural next question about design.
+  </div>
+
+  <div class="nextprev">
+    <a href="0018-indexes-and-btrees.html">← 0018 — Indexes and B-Trees</a>
+    <a href="0020-data-becoming-code.html">0020 — When Data Becomes Code →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

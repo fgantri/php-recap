@@ -1,0 +1,235 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 2 — Front Controller and Router</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · Milestone project</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Project 2</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Front Controller and Router</h1>
+<p class="subtitle">The skeleton your course built in Chapter 09, with the two limitations removed — dynamic segments and HTTP methods — plus a real template layer and honest error handling.</p>
+
+<div class="meta"><span>~2 hours</span><span>Uses lessons 0008–0015</span><span>Portfolio piece</span></div>
+
+<p>No database yet. That is deliberate: this milestone is about <strong>structure</strong>, and mixing in persistence would blur what you're actually demonstrating. Data comes from a hardcoded array, exactly as your course did before Chapter 10.</p>
+
+<h2>Target structure</h2>
+
+<pre><code>~/websites/lowlevel-web/
+├── 01-http-server/
+└── 02-mini-framework/
+    ├── public/
+    │   ├── index.php          ← the ONLY entry point
+    │   └── style.css
+    ├── src/
+    │   ├── Router.php
+    │   ├── Request.php
+    │   ├── functions.php      ← view(), e(), abort(), dd()
+    │   └── data.php           ← the fake "database"
+    ├── controllers/
+    │   ├── home.php
+    │   └── notes/
+    │       ├── index.php
+    │       ├── show.php
+    │       └── create.php
+    ├── views/
+    │   ├── layout.view.php
+    │   ├── home.view.php
+    │   ├── notes/
+    │   └── errors/
+    │       ├── 404.view.php
+    │       ├── 403.view.php
+    │       └── 500.view.php
+    └── routes.php</code></pre>
+
+<div class="callout warn">
+  <span class="label">Note what is where</span>
+  <p><code>public/</code> is the document root. <strong>Everything else sits above it</strong> and cannot be reached by URL, no matter what someone types. That is the security property Lesson 0002 and 0007 were building toward, and it is why Laravel and Symfony are laid out this way.</p>
+  <p>Run it with <code>php -S localhost:8888 -t public</code> — the <code>-t</code> flag sets the document root, mimicking what nginx's <code>root</code> directive does.</p>
+</div>
+
+<h2>Requirements</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:2rem"></th><th>Requirement</th><th>Lesson</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Single entry point; no other <code>.php</code> file is reachable by URL</td><td>0007, 0014</td></tr>
+    <tr><td>2</td><td>Bootstrap in the correct order: helpers → config → services → routes → dispatch</td><td>0014</td></tr>
+    <tr><td>3</td><td>Router with <code>{param}</code> segments compiled to named capture groups, anchored</td><td>0014</td></tr>
+    <tr><td>4</td><td>Method matching, with a real <code>405</code> and an <code>Allow</code> header</td><td>0005, 0014</td></tr>
+    <tr><td>5</td><td>A <code>Request</code> class wrapping <code>$_SERVER</code>, <code>$_GET</code>, <code>$_POST</code> — no superglobals outside it</td><td>0005</td></tr>
+    <tr><td>6</td><td><code>view($template, $data)</code> using output buffering, returning a string</td><td>0013</td></tr>
+    <tr><td>7</td><td>A layout the views compose into, rather than head/footer partials</td><td>0013</td></tr>
+    <tr><td>8</td><td><strong>Every</strong> user-derived value escaped with <code>e()</code> on output</td><td>0013</td></tr>
+    <tr><td>9</td><td><code>abort($code)</code> that falls back to a generic error view for codes with no template</td><td>0009, 0013</td></tr>
+    <tr><td>10</td><td>Global exception handler: logs the detail, shows the user a 500 page</td><td>0015</td></tr>
+    <tr><td>11</td><td><code>declare(strict_types=1)</code> at the top of every file</td><td>0009</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>The one genuinely new piece: a Request object</h2>
+
+<p>Your course read <code>$_SERVER['REQUEST_URI']</code> directly, and noted that frameworks wrap these in a Request object "which makes code testable — you can construct a fake request without a real HTTP server". Build that.</p>
+
+<div class="filename">src/Request.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+declare(strict_types=1);
+
+<span class="k">final class</span> Request
+{
+    <span class="k">public function</span> __construct(
+        <span class="k">public readonly string</span> <span class="n">$method</span>,
+        <span class="k">public readonly string</span> <span class="n">$uri</span>,
+        <span class="k">public readonly array</span>  <span class="n">$query</span> = [],
+        <span class="k">public readonly array</span>  <span class="n">$body</span> = [],
+        <span class="k">public readonly array</span>  <span class="n">$headers</span> = [],
+    ) {}
+
+    <span class="k">public static function</span> fromGlobals(): <span class="k">self</span>
+    {
+        <span class="k">return new self</span>(
+            <span class="n">$_SERVER</span>[<span class="s">'REQUEST_METHOD'</span>] ?? <span class="s">'GET'</span>,
+            <span class="n">$_SERVER</span>[<span class="s">'REQUEST_URI'</span>]    ?? <span class="s">'/'</span>,
+            <span class="n">$_GET</span>,
+            <span class="n">$_POST</span>,
+            <span class="k">function_exists</span>(<span class="s">'getallheaders'</span>) ? getallheaders() : [],
+        );
+    }
+
+    <span class="k">public function</span> path(): <span class="k">string</span>
+    {
+        <span class="k">return</span> parse_url(<span class="n">$this</span>-&gt;uri, PHP_URL_PATH) ?: <span class="s">'/'</span>;
+    }
+
+    <span class="k">public function</span> input(<span class="k">string</span> <span class="n">$key</span>, <span class="n">$default</span> = <span class="k">null</span>)
+    {
+        <span class="k">return</span> <span class="n">$this</span>-&gt;body[<span class="n">$key</span>] ?? <span class="n">$this</span>-&gt;query[<span class="n">$key</span>] ?? <span class="n">$default</span>;
+    }
+}</code></pre>
+
+<div class="callout win">
+  <span class="label">Why this is the highest-value class in the project</span>
+  <p><strong>It is testable.</strong> <code>new Request('GET', '/notes/17')</code> — no server, no browser, no network. Your router can now be tested in milliseconds. That property is the entire reason frameworks do this.</p>
+  <p><strong>It names the boundary.</strong> Superglobals appear in exactly one method, <code>fromGlobals()</code>. Everything downstream receives a typed object. When you later need to handle a JSON body or trust a proxy header, there is one place to change.</p>
+  <p><strong><code>readonly</code> means the request cannot be mutated.</strong> Nothing downstream can quietly rewrite the URI and confuse everything after it. This is <a href="https://www.php-fig.org/psr/psr-7/">PSR-7</a>'s central design decision, and now you know why it was made.</p>
+</div>
+
+<h2>Layouts, replacing partials</h2>
+
+<p>Your course used <code>head.php</code> / <code>nav.php</code> / <code>footer.php</code> partials and noted the awkwardness — opening tags in one file and closing them in another. With <code>view()</code> returning a string, there is a better shape:</p>
+
+<div class="filename">views/layout.view.php</div>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="utf-8"&gt;
+    &lt;title&gt;&lt;?= e(<span class="n">$title</span> ?? <span class="s">'Notes'</span>) ?&gt;&lt;/title&gt;
+    &lt;link rel="stylesheet" href="/style.css"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;nav&gt;
+        &lt;a href="/" class="&lt;?= urlIs(<span class="s">'/'</span>) ? <span class="s">'active'</span> : <span class="s">''</span> ?&gt;"&gt;Home&lt;/a&gt;
+        &lt;a href="/notes" class="&lt;?= urlIs(<span class="s">'/notes'</span>) ? <span class="s">'active'</span> : <span class="s">''</span> ?&gt;"&gt;Notes&lt;/a&gt;
+    &lt;/nav&gt;
+
+    &lt;main&gt;&lt;?= <span class="n">$content</span> ?&gt;&lt;/main&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+<pre><code><span class="k">function</span> render(<span class="k">string</span> <span class="n">$template</span>, <span class="k">array</span> <span class="n">$data</span> = []): <span class="k">string</span>
+{
+    <span class="k">return</span> view(<span class="s">'layout'</span>, [
+        <span class="s">'title'</span>   =&gt; <span class="n">$data</span>[<span class="s">'title'</span>] ?? <span class="k">null</span>,
+        <span class="s">'content'</span> =&gt; view(<span class="n">$template</span>, <span class="n">$data</span>),   <span class="c">// inner renders first</span>
+    ]);
+}</code></pre>
+
+<p>Note <code>&lt;?= $content ?&gt;</code> is deliberately <strong>not</strong> escaped — it is already-rendered HTML from your own template, not user input. Being able to state <em>why</em> a specific unescaped output is safe is the difference between knowing the rule and understanding it.</p>
+
+<h2>Acceptance tests</h2>
+
+<pre><code>php -S localhost:8888 -t public
+
+curl -i localhost:8888/                        <span class="c"># 200 home</span>
+curl -i localhost:8888/notes                   <span class="c"># 200 list</span>
+curl -i localhost:8888/notes/1                 <span class="c"># 200, id captured</span>
+curl -i localhost:8888/notes/create            <span class="c"># 200 — NOT captured as {id}</span>
+curl -i localhost:8888/notes/999               <span class="c"># 404, proper error view</span>
+curl -i -X DELETE localhost:8888/notes         <span class="c"># 405 + Allow header</span>
+curl -i 'localhost:8888/notes?sort=desc'       <span class="c"># 200 — query ignored in routing</span>
+curl -i localhost:8888/evil/notes/1            <span class="c"># 404 — anchors hold</span>
+curl -i localhost:8888/src/Router.php          <span class="c"># 404 — outside the web root</span>
+curl -i localhost:8888/../src/Router.php       <span class="c"># 404 — traversal blocked</span></code></pre>
+
+<p>Then the escaping check. Add a note whose body is <code>&lt;img src=x onerror=alert(1)&gt;</code> to <code>src/data.php</code>, load the page, and view source. You must see <code>&amp;lt;img</code>. If you see a broken-image icon, you have an XSS hole — find the unescaped output.</p>
+
+<h2>Commit and tag</h2>
+
+<pre><code>git add .
+git commit -m "Add front controller with a pattern-matching router
+
+Compiles {param} segments into anchored named capture groups, matches on
+HTTP method with a correct 405 and Allow header, and wraps the request in
+an immutable Request object so routing can be tested without a server.
+Views render through output buffering into a layout, with escaping on
+every user-derived value."
+
+git tag -a m2-mini-framework -m "Milestone 2: front controller and router"
+git push origin main --tags</code></pre>
+
+<div class="callout win">
+  <span class="label">Bring it for review</span>
+  <p>Say <strong>"review project 2"</strong>. I will look hardest at: whether any route pattern can be bypassed, whether a single user-derived value escapes unescaped, whether <code>Request</code> is genuinely the only place superglobals appear, whether the 405 path actually sets <code>Allow</code>, and whether <code>abort()</code> handles a code with no view file rather than fataling.</p>
+</div>
+
+<h2>Stretch goals</h2>
+
+<div class="grid two">
+  <div class="card">
+    <h4>A middleware pipeline</h4>
+    <p>Let routes declare middleware. Each receives the <code>Request</code> and a <code>$next</code> callable, and may act before or after. Twenty lines, and it is exactly Laravel's pipeline — pure callbacks from Lesson 0012.</p>
+  </div>
+  <div class="card">
+    <h4>Named routes</h4>
+    <p><code>$router->get('/notes/{id}', ...)->name('notes.show')</code> plus <code>route('notes.show', ['id' => 3])</code>. Now URLs live in one place and changing a path doesn't break every template.</p>
+  </div>
+  <div class="card">
+    <h4>Constrained parameters</h4>
+    <p><code>{id:\d+}</code> compiling to <code>(?P&lt;id&gt;\d+)</code>. Suddenly <code>/notes/abc</code> is a 404 at the routing layer rather than a confusing error further in.</p>
+  </div>
+  <div class="card">
+    <h4>A first test</h4>
+    <p>No framework needed: a plain PHP file asserting <code>$router->match(new Request('GET', '/notes/17'))</code> returns the right handler and params. This is the payoff for building <code>Request</code>, made visible.</p>
+  </div>
+</div>
+
+<div class="ask">
+  <strong>Ask freely.</strong> <em>"Why is my 405 returning 404?"</em>, <em>"how do I make abort() not fatal on a missing view?"</em>, <em>"is my layout approach better or worse than partials?"</em> — that last one is a genuine design question with arguments both ways, and worth talking through.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="P2" type="button">Mark this project complete</button>
+
+  <div class="nextprev">
+    <a href="../lessons/0015-reading-failure.html">← 0015 — Reading Failure</a>
+    <a href="../lessons/0016-why-a-database.html">0016 — Why a Database, Not a File →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

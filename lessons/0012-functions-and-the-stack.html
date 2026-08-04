@@ -1,0 +1,324 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0012 — Functions, the Stack, Closures</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0012</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Functions, the Stack, Closures</h1>
+<p class="subtitle">Your course called the callback "the single most important idea in the chapter". It was right. This lesson gives you the machine underneath it — and teaches you to read a stack trace, which is a bigger skill than most people admit.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: read a stack trace like a sentence</span></div>
+
+<h2>The stack, made visible</h2>
+
+<p>Step through a nested call and watch frames appear and disappear. Then trigger the error and read the trace it produces.</p>
+
+<div class="widget" id="stack">
+  <div class="widget-title">Call stack</div>
+  <pre style="margin:0 0 0.9rem;font-size:0.76rem"><code id="stack-src"></code></pre>
+  <div style="display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr))">
+    <div>
+      <h4 style="margin-top:0">Stack — newest on top</h4>
+      <div id="stack-frames"></div>
+    </div>
+    <div>
+      <h4 style="margin-top:0">What just happened</h4>
+      <div id="stack-log" class="term-shell" style="height:11rem"></div>
+    </div>
+  </div>
+  <div style="display:flex;gap:0.4rem;margin-top:0.9rem;flex-wrap:wrap" class="controls">
+    <button type="button" id="stack-step" class="primary">Step ▸</button>
+    <button type="button" id="stack-reset">Reset</button>
+    <label style="display:flex;gap:0.35rem;align-items:center;font-family:var(--sans);font-size:0.78rem">
+      <input type="checkbox" id="stack-fail" style="width:auto"> make <code>$db</code> null (trigger the error)
+    </label>
+  </div>
+</div>
+
+<h2>Reading a real trace</h2>
+
+<p>This is the shape you will see thousands of times. The skill is knowing which line to look at first.</p>
+
+<pre><code><span class="c">PHP Fatal error:  Uncaught Error: Call to a member function query() on null</span>
+  in /var/www/app/controllers/note.php:9
+Stack trace:
+#0 /var/www/app/router.php(18): require()
+#1 /var/www/app/index.php(12): require('/var/www/app/router.php')
+#2 {main}
+  thrown in /var/www/app/controllers/note.php on line 9</code></pre>
+
+<div class="callout foundation">
+  <span class="label">Foundation — How to read it in the right order</span>
+  <p><strong>1. The last line, not the first.</strong> <code>thrown in … note.php on line 9</code> is where execution actually died. That is where you look.</p>
+  <p><strong>2. The message, precisely.</strong> "Call to a member function query() on null" says <code>$db</code> was <code>null</code> — not missing, not the wrong class. <em>Null.</em> So something that should have assigned it did not.</p>
+  <p><strong>3. The frames, top-down, to answer "how did I get here".</strong> <code>#0</code> is the most recent caller, <code>{main}</code> is the file the request entered through. Reading upward from <code>{main}</code> gives you the path: index.php required router.php, which required the controller.</p>
+  <p><strong>4. Find the first frame in <em>your</em> code.</strong> In a framework trace, most frames belong to the vendor directory. The first line under your own namespace is almost always the real culprit — the framework is usually just reporting your mistake faithfully.</p>
+  <p>For this specific trace the diagnosis is your course's Chapter 14 bug: <code>index.php</code> required the router before creating <code>$db</code>, so by the time the controller ran, the variable did not exist.</p>
+</div>
+
+<h2>Scope: the restriction that is a feature</h2>
+
+<p>Your course put it well — a function that reaches out and grabs whatever is lying around cannot be understood in isolation. PHP enforces this harder than most languages: an inner function cannot see the enclosing scope <em>at all</em>, not even for reading.</p>
+
+<pre><code><span class="n">$author</span> = <span class="s">'Andy Weir'</span>;
+
+<span class="c">// Undefined variable $author — PHP does not capture automatically</span>
+<span class="n">$byAuthor</span> = <span class="k">function</span> (<span class="n">$book</span>) {
+    <span class="k">return</span> <span class="n">$book</span>[<span class="s">'author'</span>] === <span class="n">$author</span>;
+};
+
+<span class="c">// Explicit capture, by value — a snapshot taken at definition time</span>
+<span class="n">$byAuthor</span> = <span class="k">function</span> (<span class="n">$book</span>) <span class="k">use</span> (<span class="n">$author</span>) {
+    <span class="k">return</span> <span class="n">$book</span>[<span class="s">'author'</span>] === <span class="n">$author</span>;
+};
+
+<span class="c">// Arrow function — captures automatically, by value, single expression only</span>
+<span class="n">$byAuthor</span> = <span class="k">fn</span> (<span class="n">$book</span>) =&gt; <span class="n">$book</span>[<span class="s">'author'</span>] === <span class="n">$author</span>;</code></pre>
+
+<div class="callout warn">
+  <span class="label">The capture-by-value gotcha</span>
+  <pre style="margin:0.6rem 0"><code>$multiplier = 2;
+$double = fn ($n) => $n * $multiplier;
+$multiplier = 10;
+
+echo $double(5);    // 10, not 50</code></pre>
+  <p>The closure captured the <em>value</em> <code>2</code> at the moment it was defined, not a live link to the variable. This is usually what you want — it makes closures predictable — but it surprises people building closures inside loops. <code>use (&amp;$x)</code> captures by reference if you genuinely need the live link, which you rarely do.</p>
+</div>
+
+<h2>Higher-order functions, built by hand</h2>
+
+<p>Your course built <code>filter</code> and then replaced it with <code>array_filter</code>. Build the other two now — the three together cover most of what you'll ever do to a collection.</p>
+
+<pre><code><span class="k">function</span> map(<span class="n">$items</span>, <span class="n">$fn</span>) {
+    <span class="n">$out</span> = [];
+    <span class="k">foreach</span> (<span class="n">$items</span> <span class="k">as</span> <span class="n">$item</span>) { <span class="n">$out</span>[] = <span class="n">$fn</span>(<span class="n">$item</span>); }
+    <span class="k">return</span> <span class="n">$out</span>;
+}
+
+<span class="k">function</span> reduce(<span class="n">$items</span>, <span class="n">$fn</span>, <span class="n">$carry</span> = <span class="k">null</span>) {
+    <span class="k">foreach</span> (<span class="n">$items</span> <span class="k">as</span> <span class="n">$item</span>) { <span class="n">$carry</span> = <span class="n">$fn</span>(<span class="n">$carry</span>, <span class="n">$item</span>); }
+    <span class="k">return</span> <span class="n">$carry</span>;
+}</code></pre>
+
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Verb</th><th>Shape</th><th>Use when</th></tr></thead>
+  <tbody>
+    <tr><td><code>map</code></td><td>n in → n out</td><td>Transforming each element</td></tr>
+    <tr><td><code>filter</code></td><td>n in → ≤n out</td><td>Selecting a subset</td></tr>
+    <tr><td><code>reduce</code></td><td>n in → 1 out</td><td>Collapsing to a single value — sum, max, grouping</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>PHP's argument order is inconsistent between them (<code>array_map($fn, $array)</code> but <code>array_filter($array, $fn)</code>) for historical reasons. Everyone looks it up. Do not feel bad about looking it up.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — callbacks are the whole architecture of everything you named</span>
+  <p><strong>Middleware</strong> is a chain of callbacks, each handed the request and the next handler. <strong>WordPress hooks</strong> are callbacks registered against named events — <code>add_action</code> and <code>add_filter</code> are literally this. <strong>React components</strong> are functions passed to a renderer that decides when to call them. <strong>Laravel's routes</strong> are callbacks registered against URIs — exactly what you'll build in the next lesson. <strong>Event listeners, promises, array methods</strong> — all the same shape.</p>
+  <p>The unifying idea your course named: the higher-order function owns the <em>mechanism</em>, the caller owns the <em>policy</em>. Once you can see that split, framework source code stops being intimidating, because nearly all of it is that pattern applied at different scales.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l12">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "A trace ends with <code>thrown in note.php on line 9</code> and frame <code>#0</code> is <code>router.php(18)</code>. Where is the bug most likely to be?",
+      "options": [
+        "In whatever should have set up the state note.php needs",
+        "On line 18 of router.php, which made the bad call",
+        "In the framework code that built the stack trace",
+        "At the entry point, because it appears as {main}"
+      ],
+      "answer": 0,
+      "why": "Line 9 is where it <em>died</em>; the frames tell you how you arrived. A \"call on null\" means an expected value was never assigned, so the fault is in the setup path — in your course's case, requiring the router before creating <code>$db</code>. The frames narrow the search; they rarely contain the mistake themselves."
+    },
+    {
+      "q": "<code>$x = 2; $f = fn($n) => $n * $x; $x = 10; echo $f(5);</code> — output?",
+      "options": [
+        "10, because the value was captured at definition",
+        "50, because the closure sees the current value",
+        "0, because arrow functions capture nothing",
+        "An error, since $x was not passed with use"
+      ],
+      "answer": 0,
+      "why": "Arrow functions capture automatically but <strong>by value</strong>, snapshotting at the moment of definition. Reassigning <code>$x</code> afterwards has no effect. <code>use (&amp;$x)</code> would create the live link, which is almost never what you want."
+    },
+    {
+      "q": "Why can a plain PHP function not see a variable defined just above it in the same file?",
+      "options": [
+        "Each call gets a fresh frame with no outer link",
+        "PHP evaluates function bodies before the file runs",
+        "Variables outside functions are always temporary",
+        "Only superglobals may cross a file's top level"
+      ],
+      "answer": 0,
+      "why": "A call creates a new stack frame holding only parameters and locals, with no chain to enclosing scopes. That is stricter than JavaScript or Python, and deliberately so — it forces dependencies to be visible in the signature. Superglobals are the documented exception."
+    },
+    {
+      "q": "Which of the three collection verbs turns a list of orders into one total?",
+      "options": [
+        "<code>reduce</code> — many values collapse into one",
+        "<code>map</code> — each order becomes its own total",
+        "<code>filter</code> — the totals are selected out",
+        "<code>each</code> — the values are visited in turn"
+      ],
+      "answer": 0,
+      "why": "<code>reduce</code> carries an accumulator across the collection and returns it. <code>map</code> would give you a list of amounts (a useful first step: <code>array_sum(array_map(...))</code> is often clearer than one dense reduce)."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Describe the five things that happen when PHP calls a function. Then state the rule for reading an unfamiliar stack trace in the right order.",
+  "answer": "<p><strong>The call:</strong> (1) the current position is pushed onto the stack; (2) a new frame is created holding the parameters and locals; (3) the body executes inside that frame; (4) <code>return</code> ends execution immediately and produces a value; (5) the frame is discarded, the previous position is popped, and execution resumes there with the value in hand.</p><p><strong>Reading a trace:</strong> last line first — that is where it died. Then the message, read literally. Then the frames top-down to see how you arrived. Then find the first frame in your own code rather than the vendor directory; that is almost always the real culprit.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.php.net/manual/en/functions.anonymous.php">PHP Manual — Anonymous functions</a> for closures and <code>use</code> semantics, and <a href="https://www.php.net/manual/en/functions.arrow.php">arrow functions</a> for the auto-capture rules.
+  <br><br>
+  Then <a href="https://www.php.net/manual/en/functions.first_class_callable_syntax.php">first-class callable syntax</a> (PHP 8.1) — <code>strlen(...)</code> turns any function into a value, which makes higher-order code substantially cleaner than the string-name approach in older code.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0012" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"break my code deliberately in three different ways and let me read the traces"</em> — trace-reading is a skill that only comes from repetition, and doing it under no time pressure now is worth a lot on Monday.
+  </div>
+
+  <div class="nextprev">
+    <a href="0011-arrays-are-hashmaps.html">← 0011 — Arrays Are Hash Maps</a>
+    <a href="0013-templating-and-escaping.html">0013 — Templating and Escaping →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const SRC = `index.php
+  1  $db = new Database($config);
+  2  require 'router.php';
+
+router.php
+ 18  require $routes[$uri];
+
+controllers/note.php
+  9  $note = $db->query('SELECT ...')->fetch();
+ 10  require 'views/note.view.php';`;
+
+    const framesFor = (failing) => [
+      { label: "{main} — index.php", detail: "the entry point; the request begins here", vars: failing ? "$config" : "$config, $db" },
+      { label: "require() — router.php:18", detail: "require is an opcode; it runs the file inline", vars: "$routes, $uri" },
+      { label: "require() — note.php:9", detail: failing ? "about to call ->query() on $db" : "calling $db->query()", vars: "$_GET" },
+      { label: "Database::query()", detail: "the method body, in its own frame", vars: "$query, $params" },
+      { label: "PDOStatement::fetch()", detail: "deepest frame — returns a row, or false", vars: "—" },
+    ];
+
+    const srcBox = document.getElementById("stack-src");
+    const framesBox = document.getElementById("stack-frames");
+    const logBox = document.getElementById("stack-log");
+    const failToggle = document.getElementById("stack-fail");
+
+    const state = { depth: 0, unwinding: false, log: [] };
+
+    srcBox.textContent = SRC;
+
+    const paint = () => {
+      const failing = failToggle.checked;
+      const frames = framesFor(failing);
+      const shown = frames.slice(0, state.depth);
+
+      framesBox.innerHTML = shown.length
+        ? [...shown].reverse().map((frame, i) => {
+            const isTop = i === 0;
+            const bad = failing && isTop && state.depth === 3;
+            return `<div style="border:1px solid ${bad ? "var(--bad)" : isTop ? "var(--accent)" : "var(--rule)"};
+              background:${bad ? "var(--bad-bg)" : isTop ? "var(--warn-bg)" : "var(--paper)"};
+              border-radius:2px;padding:0.35rem 0.55rem;margin:0.18rem 0">
+              <div style="font-family:var(--mono);font-size:0.76rem">${frame.label}</div>
+              <div style="font-size:0.68rem;color:var(--ink-soft);margin-top:0.1rem">${frame.detail}</div>
+              <div style="font-family:var(--mono);font-size:0.66rem;color:var(--ink-faint);margin-top:0.1rem">locals: ${frame.vars}</div>
+            </div>`;
+          }).join("")
+        : `<div style="color:var(--ink-faint);font-size:0.8rem">Stack is empty — nothing running yet.</div>`;
+
+      logBox.innerHTML = state.log.length
+        ? state.log.map((l) => `<div class="${l.kind}">${l.text}</div>`).join("")
+        : `<span class="dim">Press Step to begin executing.</span>`;
+      logBox.scrollTop = logBox.scrollHeight;
+    };
+
+    const say = (text, kind = "") => state.log.push({ text, kind });
+
+    document.getElementById("stack-step").addEventListener("click", () => {
+      const failing = failToggle.checked;
+      const frames = framesFor(failing);
+
+      if (failing && state.depth === 3 && !state.unwinding) {
+        state.unwinding = true;
+        say("✕ Uncaught Error: Call to a member function query() on null", "err");
+        say("  thrown in controllers/note.php on line 9", "err");
+        say("", "");
+        say("Stack trace:", "dim");
+        say("#0 router.php(18): require()", "dim");
+        say("#1 index.php(12): require('router.php')", "dim");
+        say("#2 {main}", "dim");
+        say("", "");
+        say("→ every frame is discarded as the error propagates up", "dim");
+        state.depth = 0;
+        paint();
+        return;
+      }
+
+      if (state.unwinding) return;
+
+      if (state.depth < frames.length) {
+        say(`push frame: ${frames[state.depth].label}`, "");
+        state.depth += 1;
+      } else {
+        say(`return — frame discarded, resuming caller`, "ok");
+        state.depth -= 1;
+        if (state.depth === 0) say("stack empty — script ends", "ok");
+      }
+      paint();
+    });
+
+    const reset = () => {
+      state.depth = 0;
+      state.unwinding = false;
+      state.log = [];
+      paint();
+    };
+
+    document.getElementById("stack-reset").addEventListener("click", reset);
+    failToggle.addEventListener("change", reset);
+
+    paint();
+  })();
+</script>

@@ -1,0 +1,306 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0018 — Indexes and B-Trees</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0018</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/sql-cheatsheet.html">SQL sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Indexes and B-Trees</h1>
+<p class="subtitle">The difference between a query that takes 4 milliseconds and the same query taking 40 seconds is usually one line of DDL. Here is what that line builds.</p>
+
+<div class="meta"><span>40 minutes</span><span>Win: predict which queries need an index</span></div>
+
+<p>Your course gave the right analogy: an index is a book's index. Without one, finding every mention of a word means reading every page. With one, you jump straight there. Now the mechanism, because the mechanism is what tells you <em>when it won't help</em>.</p>
+
+<h2>Scan versus seek</h2>
+
+<div class="widget" id="btree">
+  <div class="widget-title">Finding one row among a million</div>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;margin-bottom:0.9rem" class="controls">
+    <label style="font-family:var(--sans);font-size:0.78rem">rows
+      <select id="bt-rows" style="width:auto;margin-left:0.3rem">
+        <option value="100">100</option>
+        <option value="10000">10,000</option>
+        <option value="1000000" selected>1,000,000</option>
+        <option value="100000000">100,000,000</option>
+      </select>
+    </label>
+    <button type="button" id="bt-run" class="primary">Search ▸</button>
+  </div>
+  <div id="bt-out"></div>
+  <figure style="margin:1.2rem 0 0">
+    <svg viewBox="0 0 560 150" role="img" aria-label="A B-tree with a root node, branch nodes and leaf nodes">
+      <rect x="230" y="4" width="100" height="26" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+      <text x="280" y="21" class="svg-mono" text-anchor="middle">50 | 100</text>
+      <text x="340" y="21" class="svg-small">root — held in memory</text>
+
+      <path d="M255 32 L 130 54" class="svg-stroke"/>
+      <path d="M280 32 L 280 54" class="svg-stroke"/>
+      <path d="M305 32 L 430 54" class="svg-stroke"/>
+
+      <rect x="80" y="56" width="100" height="26" rx="3" class="svg-box"/>
+      <text x="130" y="73" class="svg-mono" text-anchor="middle">17 | 33</text>
+      <rect x="230" y="56" width="100" height="26" rx="3" class="svg-box"/>
+      <text x="280" y="73" class="svg-mono" text-anchor="middle">67 | 84</text>
+      <rect x="380" y="56" width="100" height="26" rx="3" class="svg-box"/>
+      <text x="430" y="73" class="svg-mono" text-anchor="middle">117 | 150</text>
+
+      <path d="M105 84 L 60 106" class="svg-stroke"/>
+      <path d="M130 84 L 130 106" class="svg-stroke"/>
+      <path d="M155 84 L 200 106" class="svg-stroke"/>
+      <path d="M280 84 L 280 106" class="svg-stroke"/>
+      <path d="M430 84 L 430 106" class="svg-stroke"/>
+
+      <rect x="20" y="108" width="80" height="24" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+      <text x="60" y="124" class="svg-mono" text-anchor="middle">1…16</text>
+      <rect x="106" y="108" width="80" height="24" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+      <text x="146" y="124" class="svg-mono" text-anchor="middle">17…32</text>
+      <rect x="192" y="108" width="80" height="24" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+      <text x="232" y="124" class="svg-mono" text-anchor="middle">33…49</text>
+      <rect x="278" y="108" width="80" height="24" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+      <text x="318" y="124" class="svg-mono" text-anchor="middle">50…66</text>
+      <rect x="390" y="108" width="90" height="24" rx="3" class="svg-box" style="stroke:var(--ok)"/>
+      <text x="435" y="124" class="svg-mono" text-anchor="middle">117…149</text>
+
+      <text x="20" y="146" class="svg-small">leaves are linked left-to-right — which is what makes range scans and ORDER BY cheap</text>
+    </svg>
+    <figcaption>A <span class="term">B-tree</span>. Each node holds many keys, so the tree is extremely wide and therefore very shallow. Real MySQL nodes are 16 KB pages holding hundreds of keys — which is why even a billion-row table is only about four levels deep.</figcaption>
+  </figure>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Why it's a B-tree and not a binary tree</span>
+  <p>A binary tree makes one comparison per level, so a million rows needs ~20 levels. Fine in memory. Terrible on disk, because <strong>each level is a separate random read</strong>, and a random read is the expensive operation — historically a disk seek, today still an I/O round trip.</p>
+  <p>A B-tree optimises for <em>fewer, larger</em> reads instead. Each node fills one 16 KB page holding hundreds of keys, so one read eliminates hundreds of possibilities. Depth collapses from 20 to about 3.</p>
+  <p><strong>The general principle worth stealing:</strong> when a resource has a high fixed cost per access, restructure to make fewer, bigger accesses. That is the same reasoning behind HTTP request batching, database connection pooling, and why N+1 queries hurt so much.</p>
+</div>
+
+<h2>When an index does <em>not</em> help</h2>
+
+<p>This is the part that separates memorising "add an index" from understanding.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Query</th><th>Index used?</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>WHERE email = 'a@b.c'</code></td><td>✓</td><td>Exact match — the tree's purpose</td></tr>
+    <tr><td><code>WHERE id &gt; 100</code></td><td>✓</td><td>Range — descend once, then walk the linked leaves</td></tr>
+    <tr><td><code>ORDER BY created_at</code></td><td>✓</td><td>Already sorted; no sort step needed</td></tr>
+    <tr><td><code>WHERE name LIKE 'And%'</code></td><td>✓</td><td>Known prefix — a range in disguise</td></tr>
+    <tr><td><code>WHERE name LIKE '%eir'</code></td><td><strong>✕</strong></td><td>Unknown prefix. Sorted order is useless — full scan</td></tr>
+    <tr><td><code>WHERE YEAR(created_at) = 2026</code></td><td><strong>✕</strong></td><td>The <em>function's result</em> isn't indexed. Rewrite as a range</td></tr>
+    <tr><td><code>WHERE status = 'active'</code></td><td>usually ✕</td><td>Low selectivity — if 90% match, scanning is cheaper</td></tr>
+    <tr><td><code>WHERE a = 1</code> with index on <code>(b, a)</code></td><td><strong>✕</strong></td><td>Leftmost prefix rule — <code>b</code> comes first</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout danger">
+  <span class="label">The function trap, in code you will actually write</span>
+  <pre style="margin:0.6rem 0"><code>-- index on created_at is IGNORED: the index stores the column, not YEAR(column)
+SELECT * FROM notes WHERE YEAR(created_at) = 2026;
+
+-- same result, and the index works
+SELECT * FROM notes
+WHERE created_at >= '2026-01-01' AND created_at < '2027-01-01';</code></pre>
+  <p>Wrapping an indexed column in <em>any</em> function disables the index. <code>LOWER(email) = …</code>, <code>DATE(created_at) = …</code>, <code>CAST(id AS CHAR) = …</code> — all the same mistake. Keep the bare column on one side of the comparison and transform the <em>other</em> side.</p>
+</div>
+
+<h2>Composite indexes and the leftmost prefix</h2>
+
+<p>An index on <code>(user_id, created_at)</code> sorts by <code>user_id</code> first, then by <code>created_at</code> within each user. Like a phone book sorted by surname then forename.</p>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Query filters on</th><th>Index <code>(user_id, created_at)</code></th></tr></thead>
+  <tbody>
+    <tr><td><code>user_id</code></td><td>✓ — the leading column</td></tr>
+    <tr><td><code>user_id</code> AND <code>created_at</code></td><td>✓ — both, ideal</td></tr>
+    <tr><td><code>user_id</code>, ordered by <code>created_at</code></td><td>✓ — filter and sort in one pass. The best case</td></tr>
+    <tr><td><code>created_at</code> alone</td><td><strong>✕</strong> — you cannot find everyone born in March in a book sorted by surname</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>So <strong>column order is a design decision</strong>, not a formatting one. Put the column you filter by <em>equality</em> first, and the column you filter by <em>range</em> or sort by second.</p>
+
+<h2>Read the plan, don't guess</h2>
+
+<pre><code>EXPLAIN SELECT * FROM notes WHERE user_id = 1;</code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Column</th><th>Look for</th></tr></thead>
+  <tbody>
+    <tr><td><code>type</code></td><td><code>const</code> / <code>eq_ref</code> / <code>ref</code> / <code>range</code> are fine. <strong><code>ALL</code> is a full table scan</strong></td></tr>
+    <tr><td><code>key</code></td><td>Which index was chosen. <code>NULL</code> means none</td></tr>
+    <tr><td><code>rows</code></td><td>Estimated rows examined. Compare with how many you expect back</td></tr>
+    <tr><td><code>Extra</code></td><td><code>Using index</code> is excellent (covering index). <code>Using filesort</code> / <code>Using temporary</code> mean avoidable work</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>A <span class="term">covering index</span> — <code>Using index</code> — means every column the query needs is <em>in the index itself</em>, so the table is never touched. Adding one more column to an index sometimes doubles a query's speed for this reason alone.</p>
+
+<h2>The cost side</h2>
+
+<p>Indexes are a trade, and the trade is real:</p>
+
+<ul>
+  <li>Every <code>INSERT</code>, <code>UPDATE</code> and <code>DELETE</code> must update <strong>every</strong> index on the table.</li>
+  <li>Each index consumes disk and memory, competing with data for the buffer pool.</li>
+  <li>More candidate indexes means more planning work, and occasionally a worse choice.</li>
+</ul>
+
+<p>The working rule: <strong>index the columns you filter, join and sort on.</strong> Always index foreign keys. Do not index everything, and do not index a boolean column with two values.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — where this shows up outside SQL</span>
+  <p><strong>Lesson 0011's <code>array_flip</code> trick is exactly this idea</strong> — turn a list you search repeatedly into a structure you look up. The hash map is the in-memory equivalent of an index.</p>
+  <p><strong>Elasticsearch</strong> exists because B-trees cannot answer <code>LIKE '%term%'</code>; it builds an <em>inverted</em> index — word → documents containing it — which is a different structure for a different question.</p>
+  <p><strong>Every ORM lets you write a query with no index behind it</strong> and will happily run it. <code>Note::where('body', 'like', "%$q%")->get()</code> is a full table scan in fluent clothing. Reading generated SQL and running EXPLAIN on it is the only way to know — which is the argument for learning SQL before an ORM, not after.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l18">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "<code>WHERE YEAR(created_at) = 2026</code> ignores the index on <code>created_at</code>. Why?",
+      "options": [
+        "The index stores the column, not the function's result",
+        "Date functions cannot be used inside a WHERE clause",
+        "YEAR() returns a string, breaking the comparison type",
+        "Indexes only apply to integer and varchar columns"
+      ],
+      "answer": 0,
+      "why": "The B-tree is sorted by <code>created_at</code>, and knowing that order tells you nothing about the order of <code>YEAR(created_at)</code>. Rewrite as a range — <code>>= '2026-01-01' AND < '2027-01-01'</code> — and the index applies."
+    },
+    {
+      "q": "Index on <code>(user_id, created_at)</code>. Which query cannot use it?",
+      "options": [
+        "<code>WHERE created_at &gt; '2026-01-01'</code>",
+        "<code>WHERE user_id = 1</code>",
+        "<code>WHERE user_id = 1 AND created_at &gt; '2026-01-01'</code>",
+        "<code>WHERE user_id = 1 ORDER BY created_at</code>"
+      ],
+      "answer": 0,
+      "why": "Leftmost prefix rule. The index is sorted by <code>user_id</code> first, so filtering on <code>created_at</code> alone is like finding everyone born in March in a book sorted by surname. The other three all lead with <code>user_id</code>."
+    },
+    {
+      "q": "EXPLAIN reports <code>type: ALL</code> and <code>rows: 2400000</code> for a query returning 3 rows. What does that mean?",
+      "options": [
+        "A full table scan — no usable index exists",
+        "The optimiser chose a covering index scan",
+        "Two million rows genuinely matched the filter",
+        "The result was assembled in a temporary table"
+      ],
+      "answer": 0,
+      "why": "<code>ALL</code> means every row was examined to find three. That is exactly the case an index fixes. The gap between <code>rows</code> examined and rows returned is the single most useful number in an execution plan."
+    },
+    {
+      "q": "Why does adding indexes eventually slow a write-heavy table?",
+      "options": [
+        "Every write must update every index too",
+        "Indexes lock the table during modification",
+        "The planner re-sorts indexes after each insert",
+        "Index pages must be rebuilt on every commit"
+      ],
+      "answer": 0,
+      "why": "Each index is a separate B-tree that must stay consistent, so an INSERT with five indexes does six writes. Faster reads, slower writes, more disk — index what you filter, join and sort on, not everything."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Explain to a colleague why a B-tree rather than a binary tree, and then give three specific cases where adding an index will <em>not</em> speed up their query.",
+  "answer": "<p><strong>Why B-tree:</strong> the expensive operation is a random I/O access, not a comparison. A binary tree makes one comparison per level and needs ~20 levels for a million rows — 20 separate reads. A B-tree node fills a whole 16 KB page holding hundreds of keys, so one read eliminates hundreds of candidates and the tree is only ~3 levels deep. Fewer, larger reads beat more, smaller ones whenever access has a high fixed cost.</p><p><strong>Three cases it won't help:</strong> (1) a leading wildcard — <code>LIKE '%eir'</code> — because an unknown prefix makes sorted order useless; (2) the column wrapped in a function, e.g. <code>YEAR(created_at) = 2026</code>, since the index stores the column and not the result; (3) low selectivity — filtering on a status where 90% of rows match, because scanning is genuinely cheaper than seeking that many times. A fourth: violating the leftmost prefix on a composite index.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://use-the-index-luke.com/sql/anatomy">Use The Index, Luke! — Anatomy of an SQL Index</a>. Free, and the definitive practical treatment. The chapters on the leftmost prefix rule and on functions disabling indexes are the two worth reading today.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0018" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"generate a million-row table in my MariaDB and let me time queries with and without an index"</em> — feeling a 40-second query become 4 milliseconds is worth more than reading about it.
+  </div>
+
+  <div class="nextprev">
+    <a href="0017-sql-is-declarative.html">← 0017 — SQL Is Declarative</a>
+    <a href="0019-objects-and-pdo.html">0019 — Objects, Classes, PDO →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const out = document.getElementById("bt-out");
+    const rowsSelect = document.getElementById("bt-rows");
+
+    const format = (n) => n.toLocaleString("en-US");
+
+    const paint = () => {
+      const rows = Number(rowsSelect.value);
+      const perPage = 200;
+      const depth = Math.max(1, Math.ceil(Math.log(rows) / Math.log(perPage)));
+      const scanReads = Math.ceil(rows / perPage);
+
+      /* ~0.1 ms per page read is a reasonable stand-in for SSD + buffer pool. */
+      const msPerRead = 0.1;
+      const scanMs = scanReads * msPerRead;
+      const seekMs = depth * msPerRead;
+
+      const bar = (label, value, max, colour, detail) => `
+        <div style="display:flex;align-items:center;gap:0.6rem;margin:0.35rem 0">
+          <span style="flex:0 0 7rem;font-family:var(--sans);font-size:0.78rem">${label}</span>
+          <span style="flex:1;background:var(--paper);border:1px solid var(--rule-soft);border-radius:2px;height:1.1rem;position:relative">
+            <span style="position:absolute;inset:0 auto 0 0;width:${Math.max(value / max * 100, 0.6)}%;background:${colour};border-radius:2px"></span>
+          </span>
+          <span style="flex:0 0 8.5rem;text-align:right;font-family:var(--mono);font-size:0.74rem">${detail}</span>
+        </div>`;
+
+      const fmtMs = (ms) => ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms.toFixed(1)} ms`;
+
+      out.innerHTML =
+        bar("Full table scan", scanMs, scanMs, "var(--bad)", `${format(scanReads)} reads · ${fmtMs(scanMs)}`) +
+        bar("B-tree seek", seekMs, scanMs, "var(--ok)", `${depth} reads · ${fmtMs(seekMs)}`) +
+        `<p style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.8rem 0 0">
+          Finding one row among <strong>${format(rows)}</strong>: the scan reads about ${format(scanReads)} pages;
+          the index descends <strong>${depth}</strong> levels and stops.
+          That is a <strong>${Math.round(scanReads / depth).toLocaleString("en-US")}×</strong> difference —
+          and notice the index barely gets deeper as the table grows, because depth is logarithmic while the scan is linear.
+          ${rows >= 1000000 ? " This is the gap between a page that loads and a page that times out." : ""}
+        </p>`;
+    };
+
+    document.getElementById("bt-run").addEventListener("click", paint);
+    rowsSelect.addEventListener("change", paint);
+    paint();
+  })();
+</script>

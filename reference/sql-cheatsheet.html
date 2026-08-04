@@ -1,0 +1,244 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQL Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Reference</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">SQL</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="glossary.html">Glossary</a>
+    <a href="#" onclick="window.print();return false">Print</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>SQL Cheat Sheet</h1>
+<p class="subtitle">MySQL/MariaDB dialect. You describe the result; the planner decides how to get it.</p>
+
+<h2>Connecting</h2>
+
+<pre><code>sudo service mariadb start
+mysql -u root                       <span class="c"># local root, usually no password</span>
+mysql -u root -p myapp              <span class="c"># with password, straight into a database</span>
+mysql -u root myapp &lt; dump.sql      <span class="c"># run a file</span>
+
+SHOW DATABASES;  USE myapp;  SHOW TABLES;
+DESCRIBE notes;          -- columns, types, nullability, keys
+SHOW CREATE TABLE notes; -- the full definition, including indexes and FKs
+SHOW INDEX FROM notes;</code></pre>
+
+<h2>Types — the six you'll use</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Type</th><th>For</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td><code>INT</code></td><td>IDs, counts</td><td>4 bytes. <code>BIGINT</code> when you might exceed 2.1 billion</td></tr>
+    <tr><td><code>VARCHAR(255)</code></td><td>Names, emails, titles</td><td>The limit is characters, not bytes</td></tr>
+    <tr><td><code>TEXT</code></td><td>Bodies, articles</td><td>No practical limit; cannot have a default</td></tr>
+    <tr><td><code>BOOLEAN</code></td><td>Flags</td><td>Alias for <code>TINYINT(1)</code>; stores 0/1</td></tr>
+    <tr><td><code>DATETIME</code> / <code>TIMESTAMP</code></td><td>Points in time</td><td><code>TIMESTAMP</code> converts to UTC and has a 2038 limit</td></tr>
+    <tr><td><code>DECIMAL(10,2)</code></td><td><strong>Money</strong></td><td><strong>Never <code>FLOAT</code></strong> — binary floats cannot represent 0.10 exactly</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>DDL</h2>
+
+<pre><code>CREATE DATABASE myapp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE users (
+    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name       VARCHAR(255) NOT NULL,
+    email      VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY users_email_unique (email)
+);
+
+CREATE TABLE notes (
+    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id    INT UNSIGNED NOT NULL,
+    body       TEXT         NOT NULL,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT notes_user_id_foreign
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+ALTER TABLE notes ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'draft';
+ALTER TABLE notes ADD INDEX notes_user_id_index (user_id);
+ALTER TABLE notes DROP COLUMN status;</code></pre>
+
+<p><strong>Always <code>utf8mb4</code>.</strong> MySQL's <code>utf8</code> is a three-byte imitation that cannot store emoji or some CJK characters. The foreign-key column type must match the referenced key exactly, <code>UNSIGNED</code> included.</p>
+
+<h2>Reading</h2>
+
+<pre><code>SELECT id, title FROM posts;              -- name columns; * breaks on schema change
+SELECT * FROM posts WHERE id = 1;         -- SQL uses a single = to compare
+SELECT * FROM posts WHERE id IN (1,2,3);
+SELECT * FROM posts WHERE title LIKE '%blog%';   -- leading % cannot use an index
+SELECT * FROM posts WHERE published_at IS NOT NULL;   -- never = NULL
+SELECT * FROM posts ORDER BY created_at DESC LIMIT 10 OFFSET 20;
+SELECT DISTINCT author FROM posts;</code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Operator</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>=</code> <code>&lt;&gt;</code> <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code></td><td>Comparison. <code>&lt;&gt;</code> is "not equal"</td></tr>
+    <tr><td><code>AND</code> <code>OR</code> <code>NOT</code></td><td>Logic. <strong>Parenthesise mixed AND/OR</strong></td></tr>
+    <tr><td><code>IS NULL</code> / <code>IS NOT NULL</code></td><td>The only way to test null — <code>= NULL</code> is never true</td></tr>
+    <tr><td><code>BETWEEN a AND b</code></td><td>Inclusive at both ends</td></tr>
+    <tr><td><code>LIKE</code> / <code>NOT LIKE</code></td><td><code>%</code> = any run, <code>_</code> = one character</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Writing</h2>
+
+<pre><code>INSERT INTO posts (title, body) VALUES ('First', 'Hello');
+INSERT INTO posts (title) VALUES ('A'), ('B'), ('C');       -- one round trip
+
+UPDATE posts SET title = 'New' WHERE id = 1;   -- ALWAYS have a WHERE
+DELETE FROM posts WHERE id = 1;
+
+SELECT LAST_INSERT_ID();</code></pre>
+
+<div class="callout danger">
+  <span class="label">Before any UPDATE or DELETE</span>
+  <p>Run it as a <code>SELECT</code> with the same <code>WHERE</code> first and look at the row count. <code>UPDATE posts SET title='x'</code> without a <code>WHERE</code> rewrites every row in the table, and there is no undo.</p>
+  <p>In a client, <code>SET SQL_SAFE_UPDATES = 1;</code> refuses unqualified updates. Worth having on.</p>
+</div>
+
+<h2>Joins</h2>
+
+<pre><code>SELECT notes.id, notes.body, users.name
+FROM notes
+JOIN users ON users.id = notes.user_id;              -- INNER: matches only
+
+SELECT users.name, notes.body
+FROM users
+LEFT JOIN notes ON notes.user_id = users.id;         -- all users, notes if any</code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Join</th><th>Returns</th><th>Use for</th></tr></thead>
+  <tbody>
+    <tr><td><code>INNER JOIN</code></td><td>Only rows matching on both sides</td><td>The default. "Notes with their author"</td></tr>
+    <tr><td><code>LEFT JOIN</code></td><td>All left rows; nulls where no match</td><td>"All users, and their notes if any"</td></tr>
+    <tr><td><code>RIGHT JOIN</code></td><td>Mirror of LEFT</td><td>Rare — reorder the tables instead</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>An orphan row silently <em>disappears</em> from an <code>INNER JOIN</code>. That is the quiet damage referential integrity prevents — the report is simply wrong, with no error.</p>
+
+<h2>Aggregates</h2>
+
+<pre><code>SELECT COUNT(*) FROM notes;
+SELECT user_id, COUNT(*) AS total
+FROM notes
+GROUP BY user_id
+HAVING COUNT(*) &gt; 5           -- HAVING filters GROUPS; WHERE filters ROWS
+ORDER BY total DESC;</code></pre>
+
+<p><code>WHERE</code> runs before grouping, <code>HAVING</code> after. <code>COUNT(*)</code> counts rows; <code>COUNT(col)</code> skips nulls. Others: <code>SUM</code>, <code>AVG</code>, <code>MIN</code>, <code>MAX</code>.</p>
+
+<h2>Indexes</h2>
+
+<pre><code>CREATE INDEX notes_user_id_index ON notes (user_id);
+CREATE UNIQUE INDEX users_email_unique ON users (email);
+CREATE INDEX notes_user_created ON notes (user_id, created_at);   -- composite
+DROP INDEX notes_user_id_index ON notes;
+
+EXPLAIN SELECT * FROM notes WHERE user_id = 1;</code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Index</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Every foreign key</td><td>Joins and cascade checks scan without one. MySQL adds these automatically; other engines don't</td></tr>
+    <tr><td>Columns in <code>WHERE</code></td><td>The whole point</td></tr>
+    <tr><td>Columns in <code>ORDER BY</code></td><td>Avoids sorting the result set</td></tr>
+    <tr><td>Columns needing uniqueness</td><td>A unique index enforces the rule <em>and</em> speeds lookups</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Leftmost prefix rule:</strong> an index on <code>(a, b, c)</code> serves queries filtering on <code>a</code>, or <code>a,b</code>, or <code>a,b,c</code> — but not <code>b</code> alone. Column order is a design decision.</p>
+
+<p><strong>Indexes are not free.</strong> Every write must update every index. Index what you filter, join and sort on — not everything.</p>
+
+<h3>Reading EXPLAIN</h3>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th><code>type</code></th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>const</code> / <code>eq_ref</code></td><td>One row via a unique key. Best possible</td></tr>
+    <tr><td><code>ref</code></td><td>Index used, several rows match. Good</td></tr>
+    <tr><td><code>range</code></td><td>Index range scan. Fine</td></tr>
+    <tr><td><code>index</code></td><td>Whole index scanned. Suspicious</td></tr>
+    <tr><td><strong><code>ALL</code></strong></td><td><strong>Full table scan.</strong> Fix this if the table is large</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Also watch <code>rows</code> (how many the planner expects to examine) and <code>Extra</code> — <code>Using filesort</code> and <code>Using temporary</code> both mean work an index could have avoided.</p>
+
+<h2>Transactions</h2>
+
+<pre><code>START TRANSACTION;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;   -- or ROLLBACK;</code></pre>
+
+<pre><code>$pdo-&gt;beginTransaction();
+try {
+    …
+    $pdo-&gt;commit();
+} catch (Throwable $e) {
+    $pdo-&gt;rollBack();
+    throw $e;
+}</code></pre>
+
+<p>Either all of it applies or none of it does. Required whenever two changes must agree. Note that DDL (<code>CREATE</code>, <code>ALTER</code>) causes an implicit commit in MySQL — you cannot roll back a schema change.</p>
+
+<h2>Cascade options</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>ON DELETE</th><th>Effect</th><th>Right for</th></tr></thead>
+  <tbody>
+    <tr><td><code>CASCADE</code></td><td>Delete the children too</td><td>Notes belonging to a user</td></tr>
+    <tr><td><code>RESTRICT</code></td><td>Refuse while children exist</td><td>Invoices — you may be legally required to keep them</td></tr>
+    <tr><td><code>SET NULL</code></td><td>Blank the reference (column must be nullable)</td><td>A post whose author left, but which stays published</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>There is no default correct answer. It depends on what the data means.</p>
+
+<h2>Backup</h2>
+
+<pre><code>mysqldump -u root myapp &gt; backup.sql
+mysqldump -u root myapp notes &gt; notes.sql
+mysql -u root myapp &lt; backup.sql</code></pre>
+
+<p>Take one before experimenting with <code>DROP</code> or cascades. It costs a second.</p>
+
+<footer class="lesson-foot">
+  <div class="nextprev">
+    <a href="php-cheatsheet.html">← PHP cheat sheet</a>
+    <a href="security-cheatsheet.html">Security cheat sheet →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

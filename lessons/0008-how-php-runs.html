@@ -1,0 +1,366 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0008 — How PHP Actually Runs a File</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0008</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>How PHP Actually Runs a File</h1>
+<p class="subtitle">Four phases, one of which explains parse errors, one explains <code>require</code>, and one explains why PHP forgets everything between requests.</p>
+
+<div class="meta"><span>40 minutes</span><span>Win: parse → opcodes → execute → forget</span></div>
+
+<p>Your course made a sharp observation in Chapter 02: a parse error blanks the <em>entire</em> page, including correct lines above the mistake, while a runtime error produces output up to the point of failure. That difference is a window into the engine, and today you look through it.</p>
+
+<h2>The four phases</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Phase</th><th>Input → output</th><th>What can go wrong here</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Lex</strong></td><td>Characters → tokens</td><td>Unterminated string, stray character</td></tr>
+    <tr><td><strong>Parse</strong></td><td>Tokens → abstract syntax tree</td><td><code>Parse error: syntax error, unexpected …</code> — <strong>nothing runs</strong></td></tr>
+    <tr><td><strong>Compile</strong></td><td>AST → array of opcodes</td><td>Almost nothing; some optimisation happens here</td></tr>
+    <tr><td><strong>Execute</strong></td><td>Opcodes → output, one at a time</td><td>Undefined variable, calling a method on null, division by zero</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Phases 1–3 process the whole file before phase 4 runs a single instruction.</strong> That is the entire explanation. A syntax error on line 90 is caught during parsing, so the <code>echo</code> on line 3 never executes — it was compiled, but the compilation as a whole failed, so there was nothing to run.</p>
+
+<h2>Watch a file become opcodes</h2>
+
+<p>Pick a snippet and step through. The opcodes shown are close to what PHP 8 actually emits.</p>
+
+<div class="widget" id="opc">
+  <div class="widget-title">Source → tokens → opcodes → execution</div>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.9rem" id="opc-picker"></div>
+  <pre style="margin:0 0 0.8rem"><code id="opc-src"></code></pre>
+  <div style="display:grid;gap:0.9rem;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))">
+    <div><h4 style="margin-top:0">Tokens</h4><div id="opc-tokens"></div></div>
+    <div><h4 style="margin-top:0">Opcodes</h4><div id="opc-ops"></div></div>
+  </div>
+  <div style="display:flex;gap:0.4rem;align-items:center;margin-top:0.9rem;flex-wrap:wrap" class="controls">
+    <button type="button" id="opc-step" class="primary">Execute next opcode ▸</button>
+    <button type="button" id="opc-reset">Reset</button>
+    <span style="font-family:var(--sans);font-size:0.78rem;color:var(--ink-faint)">output:</span>
+    <code id="opc-output" style="min-width:6rem">—</code>
+  </div>
+  <p id="opc-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.9rem 0 0"></p>
+</div>
+
+<p>See it on your own machine — this is a real command, not a teaching aid:</p>
+
+<pre><code>cd ~/websites/demo
+printf '&lt;?php\n$a = 1;\n$b = 2;\necho $a + $b;\n' &gt; ops.php
+
+php -d opcache.enable_cli=1 -d opcache.opt_debug_level=0x10000 ops.php</code></pre>
+
+<p>You get the compiled opcode array printed before the output. Try changing <code>$a + $b</code> to <code>1 + 2</code> and run it again: the <code>ADD</code> disappears, replaced by the constant <code>3</code>. The compiler folded it. <strong>PHP optimises your code</strong>, which is not something most PHP developers know.</p>
+
+<div class="callout foundation">
+  <span class="label">Foundation — <code>if</code> is a conditional jump, and that's all control flow is</span>
+  <p>Look at the branching snippet in the widget. An <code>if/else</code> compiles to <code>JMPZ</code> — "jump if zero" — plus an unconditional <code>JMP</code> to skip the else-branch. A <code>foreach</code> compiles to <code>FE_RESET</code>, <code>FE_FETCH</code> and a backward jump.</p>
+  <p>There are no blocks and no indentation at this level. Braces exist entirely for the parser; by execution time everything is a flat list of instructions and jumps between them. This is true of every language you will ever use, and knowing it makes assembly, bytecode and stack traces stop being intimidating.</p>
+</div>
+
+<h2>Phase 4 in a web request: the lifecycle</h2>
+
+<p>A PHP-FPM worker handling a request runs a fixed sequence:</p>
+
+<figure>
+<svg viewBox="0 0 600 128" role="img" aria-label="The PHP request lifecycle from module init through request shutdown">
+  <rect x="0" y="20" width="96" height="38" rx="3" class="svg-box"/>
+  <text x="48" y="38" class="svg-label" text-anchor="middle">MINIT</text>
+  <text x="48" y="51" class="svg-small" text-anchor="middle">once, at boot</text>
+
+  <rect x="108" y="20" width="96" height="38" rx="3" class="svg-box"/>
+  <text x="156" y="38" class="svg-label" text-anchor="middle">RINIT</text>
+  <text x="156" y="51" class="svg-small" text-anchor="middle">per request</text>
+
+  <rect x="216" y="20" width="168" height="38" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="300" y="38" class="svg-label" text-anchor="middle">compile + execute your code</text>
+  <text x="300" y="51" class="svg-small" text-anchor="middle">superglobals now exist</text>
+
+  <rect x="396" y="20" width="96" height="38" rx="3" class="svg-box"/>
+  <text x="444" y="38" class="svg-label" text-anchor="middle">RSHUTDOWN</text>
+  <text x="444" y="51" class="svg-small" text-anchor="middle">per request</text>
+
+  <rect x="504" y="20" width="96" height="38" rx="3" class="svg-box"/>
+  <text x="552" y="38" class="svg-label" text-anchor="middle">MSHUTDOWN</text>
+  <text x="552" y="51" class="svg-small" text-anchor="middle">once, at exit</text>
+
+  <path d="M100 39 L106 39" class="svg-stroke" marker-end="url(#e)"/>
+  <path d="M208 39 L214 39" class="svg-stroke" marker-end="url(#e)"/>
+  <path d="M388 39 L394 39" class="svg-stroke" marker-end="url(#e)"/>
+  <path d="M496 39 L502 39" class="svg-stroke" marker-end="url(#e)"/>
+
+  <path d="M444 64 C 444 92, 156 92, 156 66" class="svg-stroke" marker-end="url(#e)"/>
+  <text x="300" y="106" class="svg-small" text-anchor="middle">the worker loops here — every variable, object and connection is destroyed first</text>
+
+  <defs>
+    <marker id="e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>The loop from RSHUTDOWN back to RINIT is <span class="term">shared-nothing</span>. The process survives; your program's world does not.</figcaption>
+</figure>
+
+<div class="callout win">
+  <span class="label">This answers the question Lesson 0001 left open</span>
+  <p>If PHP is shared-nothing, how does PHP-FPM reuse processes? Because the <em>process</em> is reused, not the <em>state</em>. MINIT-level things — the engine, loaded extensions, OPcache's compiled opcodes — persist. Everything created during your request is torn down at RSHUTDOWN.</p>
+  <p>So you get the startup cost amortised <em>and</em> a clean slate. That is a genuinely clever design, and it is why PHP survived a decade of predictions that it wouldn't.</p>
+</div>
+
+<h2>OPcache: skipping phases 1–3</h2>
+
+<p>Compiling the same file on every request is waste. OPcache stores the compiled opcode array in shared memory keyed by file path and modification time. On a hit, PHP jumps straight to execution.</p>
+
+<pre><code>php -i | grep -E 'opcache.enable|validate_timestamps'</code></pre>
+
+<div class="callout warn">
+  <span class="label">The deploy trap this creates</span>
+  <p>In production, <code>opcache.validate_timestamps=0</code> is common: don't even <em>check</em> whether files changed, just trust the cache. It's faster, and it means <strong>deploying new code changes nothing until OPcache is reset</strong>.</p>
+  <p>This is the real cause of "I deployed but the old code is still running". The fix is part of the deploy: reload PHP-FPM, or call <code>opcache_reset()</code>. It is also why atomic symlink deploys (Lesson 0002) can behave oddly — OPcache keys on the <em>resolved</em> path, so the new release genuinely is a different key.</p>
+</div>
+
+<h2><code>require</code> happens at runtime — and that's the whole trick</h2>
+
+<p>Your course noted this in Chapter 07 and built a router on it in Chapter 09. Now you can say exactly why it works:</p>
+
+<p><code>require</code> is not a compile-time directive like C's <code>#include</code>. It is an <strong>opcode</strong>, executed in phase 4 like any other. When the VM reaches it, it stops, runs the whole four-phase pipeline on the named file, splices the result into the current execution, and continues.</p>
+
+<p>Three consequences, all of which your course used:</p>
+
+<ul>
+  <li><strong>The path can be a variable</strong> — it's evaluated at execution time. This is what makes <code>require $routes[$uri];</code> possible, and dispatch is nothing more than that.</li>
+  <li><strong>It can be conditional</strong> — inside an <code>if</code>, inside a loop, inside a function.</li>
+  <li><strong>Variables carry across</strong> — because it is one continuous execution in one scope. This is why a view can see <code>$filteredBooks</code> without being handed it.</li>
+</ul>
+
+<div class="callout bridge">
+  <span class="label">Bridge — this is exactly what a bundler is not allowed to do</span>
+  <p>JavaScript's <code>import</code> is <em>static</em>: resolved before execution, paths must be literals. That constraint is not an oversight — it is what makes <strong>tree-shaking</strong> possible. A bundler can prove which exports are unused only because it can see the whole import graph without running anything.</p>
+  <p>PHP's runtime <code>require</code> buys flexibility and pays for it: no PHP tool can fully determine your dependency graph statically, which is why Composer needs a generated classmap and why static analysers like PHPStan have to work so hard. JavaScript's <code>import()</code> function is the dynamic escape hatch, and it is precisely the thing that creates a separate chunk in your bundle.</p>
+  <p>Same trade-off, opposite defaults. Now you can see why each language chose as it did.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l8">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "A file echoes on line 3 and has a missing semicolon on line 90. What does the browser show?",
+      "options": [
+        "Nothing but a parse error — line 3 never ran",
+        "The line 3 output, then a parse error message",
+        "The line 3 output and nothing further at all",
+        "A blank page with HTTP status 500 and no text"
+      ],
+      "answer": 0,
+      "why": "Parsing covers the whole file and happens before any execution. A failure there means no opcodes to run, so no output. This is the diagnostic your course pointed at: totally blank suggests a syntax error, partially rendered suggests a runtime one."
+    },
+    {
+      "q": "You deploy new code and the old version keeps serving. Which is the likeliest cause?",
+      "options": [
+        "OPcache is holding the previously compiled opcodes",
+        "The browser is serving the page from its own cache",
+        "PHP compiled the file before your changes landed",
+        "The database is returning previously cached rows"
+      ],
+      "answer": 0,
+      "why": "With <code>validate_timestamps=0</code>, OPcache never rechecks the file. Reloading PHP-FPM or calling <code>opcache_reset()</code> must be part of the deploy. A browser cache would not affect a dynamic response with no-cache headers."
+    },
+    {
+      "q": "Why can <code>require $routes[$uri];</code> work when JavaScript's <code>import</code> cannot take a variable?",
+      "options": [
+        "<code>require</code> is an opcode executed at runtime",
+        "PHP resolves all requires during compilation",
+        "PHP arrays can hold executable file handles",
+        "The router pre-compiles every possible route"
+      ],
+      "answer": 0,
+      "why": "It executes in phase 4, so its argument is an ordinary expression evaluated then. JavaScript's static <code>import</code> is resolved before execution — which costs flexibility and buys tree-shaking."
+    },
+    {
+      "q": "What survives from one request to the next inside a single PHP-FPM worker?",
+      "options": [
+        "Loaded extensions and OPcache's compiled opcodes",
+        "Global variables, if they were declared global",
+        "Any object still referenced when the request ended",
+        "The contents of the superglobal arrays"
+      ],
+      "answer": 0,
+      "why": "MINIT-level state persists — the engine, extensions, opcodes. Everything created during the request is destroyed at RSHUTDOWN, superglobals included. That is what shared-nothing means, and it is why sessions must be stored outside the process."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Name PHP's four execution phases in order. Then use them to explain, in one sentence each: why a syntax error blanks the page, and why <code>require</code> can take a variable path.",
+  "answer": "<p><strong>Lex</strong> (characters → tokens), <strong>parse</strong> (tokens → AST), <strong>compile</strong> (AST → opcode array), <strong>execute</strong> (VM runs the opcodes).</p><p><strong>Syntax error blanks the page:</strong> parsing operates on the entire file and completes before execution begins, so a failure anywhere means there are no opcodes to run — including for the correct lines above it.</p><p><strong><code>require</code> takes a variable:</strong> it is compiled into an opcode and executed in phase 4, so its argument is an ordinary runtime expression rather than something resolved at compile time.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.phpinternalsbook.com/php7/zend_engine/zend_compiler.html">PHP Internals Book — The Compiler</a>. Written by core contributors and free. You do not need to finish it; reading the first section makes the engine concrete in a way no tutorial does.
+  <br><br>
+  Then the <a href="https://www.php.net/manual/en/book.opcache.php">OPcache manual</a>, specifically the <code>validate_timestamps</code> and <code>opcache_reset</code> pages — those two settings cause real production incidents.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0008" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Try: <em>"dump the opcodes for my server.php from Project 1 and walk me through them"</em>, or <em>"what does PHP 8's JIT actually compile, and why does it barely help web apps?"</em> — the answer (it helps CPU-bound loops, and web requests are I/O-bound) is a genuinely clarifying one.
+  </div>
+
+  <div class="nextprev">
+    <a href="../projects/01-http-server.html">← Project 1</a>
+    <a href="0009-variables-and-memory.html">0009 — Variables, Types, Memory →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const SNIPPETS = {
+      "arithmetic": {
+        src: "<?php\n$a = 1;\n$b = 2;\necho $a + $b;",
+        tokens: ["T_OPEN_TAG", "T_VARIABLE $a", "=", "T_LNUMBER 1", ";", "T_VARIABLE $b", "=", "T_LNUMBER 2", ";", "T_ECHO", "T_VARIABLE $a", "+", "T_VARIABLE $b", ";"],
+        ops: [
+          { op: "ASSIGN", args: "$a, 1", effect: "$a = 1" },
+          { op: "ASSIGN", args: "$b, 2", effect: "$b = 2" },
+          { op: "ADD", args: "~2, $a, $b", effect: "temp ~2 = 3" },
+          { op: "ECHO", args: "~2", effect: "output: 3", out: "3" },
+          { op: "RETURN", args: "1", effect: "script ends" },
+        ],
+        note: "<code>~2</code> is a <strong>temporary</strong> — an unnamed slot the compiler invented to hold the result of the addition. You never declared it and cannot reach it. Most opcodes produce one.",
+      },
+      "constant folding": {
+        src: "<?php\necho 1 + 2;",
+        tokens: ["T_OPEN_TAG", "T_ECHO", "T_LNUMBER 1", "+", "T_LNUMBER 2", ";"],
+        ops: [
+          { op: "ECHO", args: "3", effect: "output: 3", out: "3" },
+          { op: "RETURN", args: "1", effect: "script ends" },
+        ],
+        note: "<strong>The ADD is gone.</strong> Both operands were known at compile time, so the optimiser computed the result during phase 3 and baked in the constant. Your code did arithmetic; the running program does not.",
+      },
+      "branching": {
+        src: "<?php\nif ($x) {\n  echo 'a';\n} else {\n  echo 'b';\n}",
+        tokens: ["T_OPEN_TAG", "T_IF", "(", "T_VARIABLE $x", ")", "{", "T_ECHO", "T_STRING 'a'", ";", "}", "T_ELSE", "{", "T_ECHO", "T_STRING 'b'", ";", "}"],
+        ops: [
+          { op: "JMPZ", args: "$x, →4", effect: "if $x is falsy, jump to opcode 4" },
+          { op: "ECHO", args: "'a'", effect: "output: a", out: "a" },
+          { op: "JMP", args: "→5", effect: "skip the else branch" },
+          { op: "NOP", args: "", effect: "padding left by the compiler" },
+          { op: "ECHO", args: "'b'", effect: "the else branch" },
+          { op: "RETURN", args: "1", effect: "script ends" },
+        ],
+        note: "There are no braces and no blocks here — just a flat list and two jumps. <code>JMPZ</code> is \"jump if zero\", where zero means falsy. <strong>Every control structure in every language compiles to this.</strong>",
+      },
+      "function call": {
+        src: "<?php\nfunction add($x, $y) {\n  return $x + $y;\n}\necho add(1, 2);",
+        tokens: ["T_OPEN_TAG", "T_FUNCTION", "T_STRING add", "(", "T_VARIABLE $x", ",", "T_VARIABLE $y", ")", "{", "T_RETURN", "…", "}", "T_ECHO", "T_STRING add", "(", "…", ")"],
+        ops: [
+          { op: "INIT_FCALL", args: "2, 'add'", effect: "push a new call frame" },
+          { op: "SEND_VAL", args: "1", effect: "argument 1 → the frame" },
+          { op: "SEND_VAL", args: "2", effect: "argument 2 → the frame" },
+          { op: "DO_UCALL", args: "~0", effect: "jump into add(); its ADD and RETURN run", out: "" },
+          { op: "ECHO", args: "~0", effect: "output: 3", out: "3" },
+          { op: "RETURN", args: "1", effect: "script ends" },
+        ],
+        note: "<code>INIT_FCALL</code> builds the stack frame from Lesson 0001 and 0012. Arguments are <em>sent</em> into it one at a time before the jump. This is literally the call stack, in instructions.",
+      },
+    };
+
+    const picker = document.getElementById("opc-picker");
+    const srcBox = document.getElementById("opc-src");
+    const tokBox = document.getElementById("opc-tokens");
+    const opsBox = document.getElementById("opc-ops");
+    const output = document.getElementById("opc-output");
+    const note = document.getElementById("opc-note");
+
+    const state = { name: "arithmetic", pc: 0, out: "" };
+
+    const paint = () => {
+      const snippet = SNIPPETS[state.name];
+      srcBox.textContent = snippet.src;
+
+      tokBox.innerHTML = snippet.tokens.map((t) =>
+        `<span style="display:inline-block;font-family:var(--mono);font-size:0.7rem;border:1px solid var(--rule);
+          border-radius:2px;padding:0.08rem 0.3rem;margin:0.1rem 0.15rem 0.1rem 0;background:var(--paper)">${t}</span>`).join("");
+
+      opsBox.innerHTML = snippet.ops.map((o, index) => {
+        const done = index < state.pc;
+        const current = index === state.pc;
+        const border = current ? "var(--accent)" : done ? "var(--ok)" : "var(--rule)";
+        const bg = current ? "var(--warn-bg)" : done ? "var(--ok-bg)" : "var(--paper)";
+        return `<div style="border:1px solid ${border};background:${bg};border-radius:2px;padding:0.28rem 0.45rem;margin:0.16rem 0">
+          <span style="font-family:var(--mono);font-size:0.76rem">
+            <span style="color:var(--ink-faint)">${String(index).padStart(2, "0")}</span>
+            <strong>${o.op}</strong> ${o.args}</span>
+          ${current || done ? `<div style="font-size:0.7rem;color:var(--ink-soft);margin-top:0.1rem">${o.effect}</div>` : ""}
+        </div>`;
+      }).join("");
+
+      output.textContent = state.out || "—";
+      note.innerHTML = snippet.note;
+      document.getElementById("opc-step").disabled = state.pc >= snippet.ops.length;
+      [...picker.children].forEach((b) => b.classList.toggle("primary", b.textContent === state.name));
+    };
+
+    document.getElementById("opc-step").addEventListener("click", () => {
+      const snippet = SNIPPETS[state.name];
+      const op = snippet.ops[state.pc];
+      if (!op) return;
+      if (op.out) state.out += op.out;
+      state.pc += op.op === "JMPZ" ? 1 : 1;
+      paint();
+    });
+
+    document.getElementById("opc-reset").addEventListener("click", () => {
+      state.pc = 0;
+      state.out = "";
+      paint();
+    });
+
+    for (const name of Object.keys(SNIPPETS)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = name;
+      button.addEventListener("click", () => {
+        state.name = name;
+        state.pc = 0;
+        state.out = "";
+        paint();
+      });
+      picker.append(button);
+    }
+
+    paint();
+  })();
+</script>

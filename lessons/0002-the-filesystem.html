@@ -1,0 +1,292 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0002 — The Filesystem as a Tree</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Friday · The machine and the wire</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0002</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/glossary.html">Glossary</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>The Filesystem as a Tree</h1>
+<p class="subtitle">A filename is not a file. Understanding the difference explains permissions, symlinks, document roots, and the most common security bug in file-serving code.</p>
+
+<div class="meta"><span>30 minutes</span><span>Win: what "file not found" really means</span></div>
+
+<p>Your course gave you the tree: directories inside directories, one root, absolute paths starting at <code>/</code>, relative paths starting from wherever you are. All correct. Now the part it skipped — <strong>what a directory actually contains</strong>.</p>
+
+<h2>A directory is a table of names</h2>
+
+<p>A directory does not contain files. It contains a list of <em>names</em>, each paired with a number. That number is an <span class="term">inode</span>, and the inode is where the file really lives.</p>
+
+<figure>
+<svg viewBox="0 0 580 200" role="img" aria-label="A directory maps names to inode numbers; inodes hold metadata and point at data blocks">
+  <text x="0" y="12" class="svg-label" style="font-weight:650">directory <tspan class="svg-mono">/home/fgantri/demo</tspan></text>
+  <rect x="0" y="22" width="170" height="106" rx="3" class="svg-box"/>
+  <line x1="0" y1="44" x2="170" y2="44" class="svg-stroke-faint"/>
+  <text x="8" y="38" class="svg-small">name</text><text x="108" y="38" class="svg-small">inode</text>
+  <text x="8" y="62" class="svg-mono">index.php</text><text x="112" y="62" class="svg-mono">8814</text>
+  <text x="8" y="82" class="svg-mono">notes.txt</text><text x="112" y="82" class="svg-mono">8815</text>
+  <text x="8" y="102" class="svg-mono">backup.php</text><text x="112" y="102" class="svg-mono">8814</text>
+  <text x="8" y="122" class="svg-mono">views</text><text x="112" y="122" class="svg-mono">8820</text>
+  <text x="0" y="146" class="svg-small">two names, one inode — that is a hard link,</text>
+  <text x="0" y="158" class="svg-small">and neither name is "the original"</text>
+
+  <path d="M148 58 C 210 58, 210 66, 254 66" class="svg-stroke" marker-end="url(#b)"/>
+  <path d="M148 98 C 210 98, 210 74, 254 74" class="svg-stroke" marker-end="url(#b)"/>
+
+  <text x="258" y="12" class="svg-label" style="font-weight:650">inode 8814</text>
+  <rect x="258" y="22" width="150" height="106" rx="3" class="svg-box" style="stroke:var(--accent)"/>
+  <text x="266" y="40" class="svg-mono">mode  -rw-r--r--</text>
+  <text x="266" y="56" class="svg-mono">uid   1000</text>
+  <text x="266" y="72" class="svg-mono">size  412</text>
+  <text x="266" y="88" class="svg-mono">mtime Jul 31</text>
+  <text x="266" y="104" class="svg-mono">links 2</text>
+  <text x="266" y="120" class="svg-mono">blocks →</text>
+  <text x="258" y="146" class="svg-small">every fact about the file —</text>
+  <text x="258" y="158" class="svg-small">except its name</text>
+
+  <path d="M412 76 L 442 76" class="svg-stroke" marker-end="url(#b)"/>
+  <text x="446" y="12" class="svg-label" style="font-weight:650">data</text>
+  <rect x="446" y="22" width="40" height="34" rx="2" class="svg-box"/>
+  <rect x="446" y="60" width="40" height="34" rx="2" class="svg-box"/>
+  <rect x="446" y="98" width="40" height="30" rx="2" class="svg-box"/>
+  <text x="466" y="44" class="svg-mono" text-anchor="middle">blk</text>
+  <text x="466" y="82" class="svg-mono" text-anchor="middle">blk</text>
+  <text x="466" y="118" class="svg-mono" text-anchor="middle">blk</text>
+  <text x="446" y="146" class="svg-small">the bytes</text>
+  <text x="446" y="158" class="svg-small">themselves</text>
+
+  <defs>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="svg-soft"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>The name lives in the directory. Everything else lives in the inode. This one separation explains a surprising number of behaviours you have probably noticed and not questioned.</figcaption>
+</figure>
+
+<p>Three consequences follow immediately, and each one is something you have probably seen without knowing why:</p>
+
+<dl>
+  <dt>Renaming a huge file is instant</dt>
+  <dd>You edited one row in a directory table. The data never moved. This is also why <code>mv</code> across filesystems is slow — there it genuinely has to copy.</dd>
+
+  <dt>Deleting a file that a program has open doesn't break the program</dt>
+  <dd><code>rm</code> removes the <em>name</em> and decrements the link count. The inode survives as long as any process holds it open. This is why deleting a huge log file doesn't free disk space until you restart the service that's writing to it — a classic 3am production puzzle.</dd>
+
+  <dt>Permissions belong to the file, not to the name</dt>
+  <dd>They're stored in the inode. Two names for one inode always have identical permissions, because there is only one set.</dd>
+</dl>
+
+<p>Verify all of it in a real terminal:</p>
+
+<pre><code>cd ~/websites/demo
+echo 'original' &gt; a.txt
+ln a.txt b.txt            <span class="c"># hard link — a second name for the same inode</span>
+ls -li a.txt b.txt        <span class="c"># -i shows inode numbers: identical, link count 2</span>
+
+echo 'changed' &gt; a.txt
+cat b.txt                 <span class="c"># "changed" — same file, of course</span>
+
+rm a.txt
+cat b.txt                 <span class="c"># still there. the data outlives the name</span>
+
+ln -s b.txt c.txt         <span class="c"># symlink — a file whose *content* is a path</span>
+ls -l c.txt               <span class="c"># shown as c.txt -> b.txt</span>
+rm b.txt &amp;&amp; cat c.txt      <span class="c"># now broken: the path it stores points at nothing</span></code></pre>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Hard link vs symbolic link, and why you care</span>
+  <p>A <strong>hard link</strong> is another name pointing at the same inode. There is no "original"; delete any one name and the others keep working.</p>
+  <p>A <strong>symbolic link</strong> is a tiny file whose contents are a <em>path string</em>. Resolving it means reading that string and starting the lookup again. Delete the target and the symlink still exists but points nowhere.</p>
+  <p>This matters directly in deployment. The standard zero-downtime deploy — used by Capistrano, Deployer, and by hand on thousands of servers — is: upload the new release to <code>releases/2026-07-31/</code>, then atomically repoint the symlink <code>current →</code> that directory. The switch is one instantaneous operation, and rolling back is repointing it again. <code>node_modules/.bin</code>, Homebrew, and <code>/usr/bin/php</code> on many systems are all symlinks too.</p>
+</div>
+
+<h2>Permissions, without the folklore</h2>
+
+<p>Nine bits, in three groups of three. <code>rwx</code> for the owning <strong>user</strong>, for the owning <strong>group</strong>, and for <strong>others</strong>. Each group is a digit 0–7, because three bits make an octal digit — that is the entire reason <code>chmod</code> uses those strange numbers.</p>
+
+<div class="widget" id="perm">
+  <div class="widget-title">Permission calculator — click any bit</div>
+  <div style="display:flex;gap:1.4rem;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <table style="margin:0;font-family:var(--mono)">
+        <thead><tr><th></th><th style="text-align:center">r</th><th style="text-align:center">w</th><th style="text-align:center">x</th><th style="text-align:center">=</th></tr></thead>
+        <tbody id="perm-rows"></tbody>
+      </table>
+    </div>
+    <div style="min-width:13rem">
+      <div style="font-family:var(--mono);font-size:1.5rem;color:var(--accent)" id="perm-octal">644</div>
+      <div style="font-family:var(--mono);font-size:0.95rem;margin:0.2rem 0 0.7rem" id="perm-symbolic">-rw-r--r--</div>
+      <div style="font-size:0.8rem;line-height:1.5;color:var(--ink-soft)" id="perm-meaning"></div>
+      <div style="margin-top:0.8rem;display:flex;gap:0.4rem;flex-wrap:wrap">
+        <button type="button" data-preset="644">644 file</button>
+        <button type="button" data-preset="755">755 dir/exe</button>
+        <button type="button" data-preset="600">600 secret</button>
+        <button type="button" data-preset="777">777 danger</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="callout warn">
+  <span class="label">The <code>x</code> bit means something different on a directory</span>
+  <p>On a <strong>file</strong>, <code>x</code> means "may be executed as a program".</p>
+  <p>On a <strong>directory</strong>, <code>x</code> means "may be traversed" — may be used as a step in a path. Without it you cannot <code>cd</code> into it or reach anything beneath it, <em>even if you can read the directory itself</em>. And <code>r</code> without <code>x</code> means you can list the names but cannot stat or open any of them. This pair is behind most "permission denied but the file is readable?!" confusion, and it is exactly why web servers need <code>x</code> on every directory along the path to your document root.</p>
+</div>
+
+<div class="callout danger">
+  <span class="label">Why <code>777</code> is never the fix</span>
+  <p>Tutorials that say "just <code>chmod -R 777</code> to fix the upload error" are teaching you to make every file on your server world-writable — including, on shared hosting, writable by other people's applications. If uploads fail, the correct fix is to make the directory owned by (or group-shared with) the user your web server runs as. Note this for later: it is the same instinct as "just disable CSRF to make the form work".</p>
+</div>
+
+<h2>Paths, and the bug that lives in them</h2>
+
+<p>Resolving a path is mechanical: start at the root (absolute) or at the current working directory (relative), then walk each segment, with <code>.</code> meaning "stay" and <code>..</code> meaning "go up one".</p>
+
+<div class="widget" data-quiz data-seed="l2paths">
+<script type="application/json">
+{
+  "title": "Resolve these the way the kernel does",
+  "questions": [
+    {
+      "q": "cwd is <code>/home/fgantri/websites/demo</code>. What does <code>../../notes.txt</code> resolve to?",
+      "options": [
+        "<code>/home/fgantri/notes.txt</code>",
+        "<code>/home/fgantri/websites/notes.txt</code>",
+        "<code>/home/fgantri/websites/demo/notes.txt</code>",
+        "<code>/home/notes.txt</code>"
+      ],
+      "answer": 0,
+      "why": "Two <code>..</code> steps: demo → websites → fgantri. Then the filename. Counting the steps on your fingers is not beneath you — off-by-one in path depth is a real and frequent mistake."
+    },
+    {
+      "q": "A server serves files from <code>/var/www/public</code>. A request arrives for <code>/../../etc/passwd</code>. What is the risk called?",
+      "options": [
+        "Path traversal — escaping the document root",
+        "Symbolic link following — resolving a link",
+        "Privilege escalation — gaining a higher uid",
+        "Race condition — checking then using later"
+      ],
+      "answer": 0,
+      "why": "<strong>Path traversal.</strong> If the server naively concatenates the document root with the request path, <code>..</code> walks out of it and any file the server user can read becomes downloadable. The defence: resolve the final path with <code>realpath()</code> and verify it still starts with the document root — never try to strip <code>..</code> with string replacement, which is defeated by encodings like <code>%2e%2e</code>."
+    },
+    {
+      "q": "You <code>rm</code> a 40 GB log file but <code>df</code> shows no space freed. Why?",
+      "options": [
+        "A running process still holds it open",
+        "The filesystem needs a manual sync flush",
+        "Deleted blocks are zeroed in the background",
+        "The inode cache must expire before reuse"
+      ],
+      "answer": 0,
+      "why": "<code>rm</code> unlinks the name and drops the link count to zero — but the inode and its blocks survive while any process has the file open. Restart (or signal) the writer and the space appears instantly. <code>lsof +L1</code> lists exactly these zombie files."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — "document root" is just a path prefix</span>
+  <p>Every web server has one setting that says: <em>when a request for <code>/about.html</code> arrives, look for it under this directory</em>. Apache calls it <code>DocumentRoot</code>, nginx calls it <code>root</code>, PHP's built-in server uses whatever directory you launched it from, and Vercel/Netlify call it your output or publish directory.</p>
+  <p>That is the entire mechanism, and it is why your course said moving controllers <em>out</em> of the web root improves security: files the server cannot construct a path to are files nobody can request. In a Laravel project, <code>public/</code> is the document root and everything else — your <code>app/</code>, your <code>.env</code>, your <code>vendor/</code> — sits above it, unreachable by URL. Sites that get this wrong leak their <code>.env</code> to anyone who guesses the URL.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "A colleague says: \"I deleted the file but the program kept working, and the disk didn't free up. That's a bug.\" Explain what actually happened, using the words name, inode, and link count.",
+  "answer": "<p><code>rm</code> does not delete files — it <strong>unlinks names</strong>. It removes the entry from the directory table and decrements the inode's <strong>link count</strong>. The inode's data blocks are only released when the link count reaches zero <em>and</em> no process holds the file open.</p><p>So: the program kept working because its open file descriptor still refers to the live inode, and the disk didn't free up for exactly the same reason. Not a bug — it's the guarantee that lets you safely replace a binary or rotate a log while it's in use.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://man7.org/linux/man-pages/man7/inode.7.html">man 7 inode</a> — the authoritative description of what an inode holds, including the mode bits table. Pair it with <a href="https://man7.org/linux/man-pages/man7/path_resolution.7.html">man 7 path_resolution</a>, which is the kernel's own step-by-step algorithm for turning a path string into a file. Both are short, and reading a man page as a <em>specification</em> rather than a lookup is a habit worth building.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0002" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Worth chasing here: <em>"show me a path traversal exploit against a naive PHP file-server, then the realpath fix"</em> — you'll write that server in Project 1, so it's not hypothetical. Also good: <em>"why is /mnt/c slow in WSL and what does that have to do with inodes?"</em>
+  </div>
+
+  <div class="nextprev">
+    <a href="0001-bytes-programs-processes.html">← 0001 — Bytes, Programs, Processes</a>
+    <a href="0003-the-shell.html">0003 — The Shell, Properly →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const groups = ["user", "group", "other"];
+    const bits = { r: 4, w: 2, x: 1 };
+    const state = { user: 6, group: 4, other: 4 };
+
+    const rows = document.getElementById("perm-rows");
+    const octal = document.getElementById("perm-octal");
+    const symbolic = document.getElementById("perm-symbolic");
+    const meaning = document.getElementById("perm-meaning");
+
+    const paint = () => {
+      rows.textContent = "";
+      for (const group of groups) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td style="font-family:var(--sans);font-size:0.78rem">${group}</td>` +
+          Object.keys(bits).map((bit) => {
+            const on = state[group] & bits[bit];
+            return `<td style="text-align:center"><button type="button" data-g="${group}" data-b="${bit}"
+              style="width:2rem;padding:0.25rem 0;font-family:var(--mono);
+              ${on ? "background:var(--accent);color:var(--paper);border-color:var(--accent)" : ""}">${on ? bit : "–"}</button></td>`;
+          }).join("") +
+          `<td style="text-align:center;font-family:var(--mono);color:var(--accent)">${state[group]}</td>`;
+        rows.append(tr);
+      }
+
+      const digits = groups.map((g) => state[g]).join("");
+      octal.textContent = digits;
+      symbolic.textContent = "-" + groups.map((g) =>
+        (state[g] & 4 ? "r" : "-") + (state[g] & 2 ? "w" : "-") + (state[g] & 1 ? "x" : "-")).join("");
+
+      const notes = [];
+      if (state.other & 2) notes.push("<strong style='color:var(--bad)'>World-writable.</strong> Any user on this machine can rewrite it.");
+      if (state.user === 0) notes.push("The owner cannot even read their own file. Legal, and almost always a mistake.");
+      if (digits === "644") notes.push("The normal mode for a web page, config file or source file: owner edits, everyone reads.");
+      if (digits === "755") notes.push("The normal mode for a directory or an executable: everyone may traverse and run, only the owner may change.");
+      if (digits === "600") notes.push("Only the owner may read. Correct for <code>.env</code>, private keys, and anything with a password in it.");
+      if (state.other & 1 && state.other & 2 && state.other & 4) notes.push("If this is a PHP file in a web root, anyone who can write to the box can replace your application.");
+      meaning.innerHTML = notes.join("<br><br>") || "Click the bits to see what this mode allows.";
+    };
+
+    document.getElementById("perm").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.dataset.preset) {
+        const [u, g, o] = [...button.dataset.preset].map(Number);
+        Object.assign(state, { user: u, group: g, other: o });
+      } else if (button.dataset.g) {
+        state[button.dataset.g] ^= bits[button.dataset.b];
+      } else return;
+      paint();
+    });
+
+    paint();
+  })();
+</script>

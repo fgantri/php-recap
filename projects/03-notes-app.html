@@ -1,0 +1,224 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 3 — The Notes App, Complete</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Milestone project</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Project 3</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/security-cheatsheet.html">Security sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>The Notes App, Complete</h1>
+<p class="subtitle">Everything from the weekend in one application: database, auth, ownership, CSRF, escaping, and a full create/read/update/delete cycle. This is the flagship of the repository.</p>
+
+<div class="meta"><span>~2 hours</span><span>Uses lessons 0016–0024</span><span>Portfolio centrepiece</span></div>
+
+<p>Project 2 gave you the skeleton. This adds persistence and everything that makes an application safe to put in front of a stranger.</p>
+
+<h2>The schema, first</h2>
+
+<pre><code>mysql -u root
+
+CREATE DATABASE notes_app CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE notes_app;
+
+CREATE TABLE users (
+    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name       VARCHAR(255) NOT NULL,
+    email      VARCHAR(255) NOT NULL,
+    password   VARCHAR(255) NOT NULL,          -- 255, never 60
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY users_email_unique (email)      -- the constraint, not a check
+);
+
+CREATE TABLE notes (
+    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id    INT UNSIGNED NOT NULL,          -- type must match exactly
+    body       TEXT         NOT NULL,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT notes_user_id_foreign
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX notes_user_id_created (user_id, created_at)
+);</code></pre>
+
+<p>Four decisions worth being able to defend: the <strong>unique index</strong> on email (constraint, not application check — Lesson 0021); <code>VARCHAR(255)</code> for the hash (Lesson 0023); <code>ON DELETE CASCADE</code> because notes belong to their user; and the composite index <code>(user_id, created_at)</code> because the main query filters by user and sorts by date — leftmost prefix, Lesson 0018.</p>
+
+<h2>Routes</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Does</th><th>Auth</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/register</code></td><td>Registration form</td><td>guest</td></tr>
+    <tr><td>POST</td><td><code>/register</code></td><td>Create the user, log in, redirect</td><td>guest</td></tr>
+    <tr><td>GET</td><td><code>/login</code></td><td>Login form</td><td>guest</td></tr>
+    <tr><td>POST</td><td><code>/login</code></td><td>Verify, regenerate session, redirect</td><td>guest</td></tr>
+    <tr><td>POST</td><td><code>/logout</code></td><td>Destroy the session</td><td>auth</td></tr>
+    <tr><td>GET</td><td><code>/notes</code></td><td>List <em>this user's</em> notes</td><td>auth</td></tr>
+    <tr><td>GET</td><td><code>/notes/create</code></td><td>New-note form</td><td>auth</td></tr>
+    <tr><td>POST</td><td><code>/notes</code></td><td>Store, then redirect (PRG)</td><td>auth</td></tr>
+    <tr><td>GET</td><td><code>/notes/{id}</code></td><td>Show one — ownership checked</td><td>auth</td></tr>
+    <tr><td>GET</td><td><code>/notes/{id}/edit</code></td><td>Edit form — ownership checked</td><td>auth</td></tr>
+    <tr><td>PATCH</td><td><code>/notes/{id}</code></td><td>Update — ownership checked</td><td>auth</td></tr>
+    <tr><td>DELETE</td><td><code>/notes/{id}</code></td><td>Delete — ownership checked</td><td>auth</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout warn">
+  <span class="label">Browsers only send GET and POST</span>
+  <p>HTML forms cannot issue PATCH or DELETE. The universal workaround — used by Laravel, Rails and Symfony alike — is a hidden field:</p>
+  <pre style="margin:0.6rem 0"><code>&lt;form method="POST" action="/notes/17"&gt;
+    &lt;input type="hidden" name="_method" value="DELETE"&gt;
+    &lt;input type="hidden" name="_token" value="&lt;?= e($token) ?&gt;"&gt;</code></pre>
+  <p>Your router reads <code>$_POST['_method']</code> and overrides the verb. <strong>Only ever upgrade from POST</strong> — honouring <code>_method</code> on a GET would let a link perform a delete, which is precisely the crawler disaster from Lesson 0005.</p>
+</div>
+
+<h2>Requirements</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th style="width:2rem"></th><th>Requirement</th><th>Lesson</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>PDO with all three options — <code>ERRMODE_EXCEPTION</code>, <code>FETCH_ASSOC</code>, <code>EMULATE_PREPARES => false</code></td><td>0019</td></tr>
+    <tr><td>2</td><td><strong>Every</strong> query parameterised. No user value in any SQL string</td><td>0020</td></tr>
+    <tr><td>3</td><td>Passwords via <code>password_hash</code> / <code>password_verify</code></td><td>0023</td></tr>
+    <tr><td>4</td><td><code>session_regenerate_id(true)</code> on login; full destroy on logout</td><td>0023</td></tr>
+    <tr><td>5</td><td>Session cookie <code>httponly</code> + <code>samesite=Lax</code></td><td>0023</td></tr>
+    <tr><td>6</td><td>CSRF token on every state-changing form, verified with <code>hash_equals</code></td><td>0023</td></tr>
+    <tr><td>7</td><td>Post/Redirect/Get after every write, with a flash message</td><td>0023</td></tr>
+    <tr><td>8</td><td>Ownership checked on show, edit, update <em>and</em> delete — all four</td><td>0022</td></tr>
+    <tr><td>9</td><td>Every user-derived output escaped with <code>e()</code></td><td>0013</td></tr>
+    <tr><td>10</td><td>Validation with errors redisplayed and the form repopulated</td><td>0015</td></tr>
+    <tr><td>11</td><td>Guest-only and auth-only route protection</td><td>0022</td></tr>
+    <tr><td>12</td><td><code>.env</code> for credentials, gitignored, with a committed <code>.env.example</code></td><td>0019</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout danger">
+  <span class="label">Requirement 8 is where people get this wrong</span>
+  <p>It is easy to check ownership on the page that <em>displays</em> a note and forget the one that <em>deletes</em> it. An attacker does not need your edit form — they can POST directly:</p>
+  <pre style="margin:0.6rem 0"><code>curl -X POST localhost:8888/notes/42 \
+     -d '_method=DELETE&_token=...' -b 'PHPSESSID=my-own-session'</code></pre>
+  <p><strong>Every route that touches a record by id needs the check.</strong> Not the ones with forms — all of them. This is the single most common real-world IDOR, and it is why frameworks push authorization into policies applied declaratively rather than remembered per-controller.</p>
+</div>
+
+<h2>The pieces worth seeing</h2>
+
+<div class="filename">src/auth.php</div>
+<pre><code><span class="k">function</span> attempt(Database <span class="n">$db</span>, <span class="k">string</span> <span class="n">$email</span>, <span class="k">string</span> <span class="n">$password</span>): <span class="k">bool</span>
+{
+    <span class="n">$user</span> = <span class="n">$db</span>-&gt;query(<span class="s">'SELECT * FROM users WHERE email = ?'</span>, [<span class="n">$email</span>])-&gt;fetch();
+
+    <span class="c">// verify even when no user exists, so timing does not reveal registered emails</span>
+    <span class="n">$hash</span> = <span class="n">$user</span>[<span class="s">'password'</span>] ?? <span class="s">'$2y$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin'</span>;
+
+    <span class="k">if</span> (! password_verify(<span class="n">$password</span>, <span class="n">$hash</span>) || ! <span class="n">$user</span>) {
+        <span class="k">return false</span>;
+    }
+
+    session_regenerate_id(<span class="k">true</span>);
+    <span class="n">$_SESSION</span>[<span class="s">'user_id'</span>] = (<span class="k">int</span>) <span class="n">$user</span>[<span class="s">'id'</span>];
+
+    <span class="k">return true</span>;
+}</code></pre>
+
+<p>That dummy hash is worth understanding: without it, a login attempt for an unknown email returns <em>faster</em> than one for a known email, because <code>password_verify</code> never runs. Timing alone then reveals which addresses are registered. Small detail, real leak.</p>
+
+<div class="filename">src/csrf.php</div>
+<pre><code><span class="k">function</span> csrf_token(): <span class="k">string</span>
+{
+    <span class="k">return</span> <span class="n">$_SESSION</span>[<span class="s">'csrf'</span>] ??= bin2hex(random_bytes(32));
+}
+
+<span class="k">function</span> verify_csrf(): <span class="k">void</span>
+{
+    <span class="k">if</span> (! hash_equals(csrf_token(), <span class="n">$_POST</span>[<span class="s">'_token'</span>] ?? <span class="s">''</span>)) {
+        abort(419);
+    }
+}</code></pre>
+
+<h2>Acceptance tests</h2>
+
+<p>Work every line. Several of these are the ones people skip, and they are the ones that matter.</p>
+
+<pre><code><span class="c"># --- functionality ---</span>
+Register two users. Create notes as each.
+Log in as user 1 → /notes shows ONLY user 1's notes.
+Create a note → redirected, flash message shown, refresh does NOT duplicate it.
+Edit and delete your own note. Both work.
+
+<span class="c"># --- authorization: the important part ---</span>
+As user 1, visit /notes/{a-note-belonging-to-user-2}     → 403 (or 404, decided deliberately)
+As user 1, POST _method=DELETE to user 2's note id       → 403, and the note SURVIVES
+Log out, visit /notes                                    → redirected to /login
+Log in, visit /login                                     → redirected to /notes
+
+<span class="c"># --- security ---</span>
+Submit a form with _token removed                        → 419
+Create a note whose body is &lt;img src=x onerror=alert(1)&gt;
+  → view source: you MUST see &amp;lt;img
+Register with an email that already exists               → clean error, not a 500
+Register the same email from two terminals at once       → the unique index holds
+Note id ?id=1 OR 1=1 in any URL                          → no extra data, ever
+
+<span class="c"># --- data ---</span>
+DELETE FROM users WHERE id = 1;   → user 1's notes are gone too (cascade)
+INSERT a note with user_id = 999  → rejected by the foreign key</code></pre>
+
+<h2>Commit and tag</h2>
+
+<pre><code>git add .
+git commit -m "Add the notes application with authentication and authorization
+
+Session auth with password_hash and id regeneration on login, CSRF tokens
+verified with hash_equals on every state change, post-redirect-get with
+flash messages, ownership checks on all four record routes, and output
+escaping throughout. Schema enforces uniqueness and referential integrity
+in the database rather than in application code."
+
+git tag -a m3-notes-app -m "Milestone 3: complete notes application"
+git push origin main --tags</code></pre>
+
+<div class="callout win">
+  <span class="label">Bring it for review — this is the one that matters most</span>
+  <p>Say <strong>"review project 3"</strong>. I will go through it as a security review, not a style review. Specifically: <em>every</em> route that takes an id, checked for the ownership test; every form, checked for a token; every output, checked for escaping; the login path, checked for user enumeration; and the PDO configuration, checked for the emulated-prepares trap that silently breaks <code>!==</code> comparisons.</p>
+  <p>Expect findings. A first implementation that passes all of that cleanly would be unusual.</p>
+</div>
+
+<h2>Stretch goals</h2>
+
+<div class="grid two">
+  <div class="card"><h4>Pagination</h4><p><code>LIMIT</code> + <code>OFFSET</code> with page links. Then read Lesson 0018 again and notice why deep offsets get slow — the engine still walks every skipped row.</p></div>
+  <div class="card"><h4>Search</h4><p><code>WHERE body LIKE ?</code> with a bound parameter. Note that a leading <code>%</code> cannot use an index; that limitation is the entire reason full-text search engines exist.</p></div>
+  <div class="card"><h4>Soft deletes</h4><p>A <code>deleted_at</code> column and a filter on every read. Feel how easy it is to forget one — that is why frameworks make it a trait with a global scope.</p></div>
+  <div class="card"><h4>"Remember me"</h4><p>A long-lived token in its own table, rotated on use. Genuinely subtle to get right, and a good thing to have thought about before you need it.</p></div>
+</div>
+
+<div class="ask">
+  <strong>Ask freely.</strong> <em>"How do I redisplay validation errors without losing what they typed?"</em>, <em>"is my auth flow actually safe?"</em>, <em>"why does my CSRF check fail after logging out and back in?"</em> — that last one has a good answer involving session regeneration, and it catches everyone once.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="P3" type="button">Mark this project complete</button>
+
+  <div class="nextprev">
+    <a href="../lessons/0024-from-here-to-everything.html">← 0024 — From Here to Everything</a>
+    <a href="04-request-response.html">Project 4 — Request/Response + middleware →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>

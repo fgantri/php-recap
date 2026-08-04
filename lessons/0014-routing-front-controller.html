@@ -1,0 +1,371 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0014 — Routing and the Front Controller</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Saturday · The language and the structure</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0014</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/php-cheatsheet.html">PHP sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Routing and the Front Controller</h1>
+<p class="subtitle">Your course built a router that matches whole URIs. Today you add the two things that make it a real one: dynamic segments and method matching — which is to say, you build Laravel's routing layer in about forty lines.</p>
+
+<div class="meta"><span>50 minutes</span><span>Win: one entry point, any URL</span></div>
+
+<p>You already know the shape from Chapter 09: one entry point, read the URI, look it up, <code>require</code> a controller. And you know from <a href="0007-server-vs-runtime.html">Lesson 0007</a> exactly what makes it possible — nginx's <code>try_files</code> falling through to <code>index.php</code> when no file matches. The two halves now meet.</p>
+
+<h2>The limitation to remove</h2>
+
+<p>Your course was explicit about it: <em>"Your router matches whole URIs, so dynamic segments like <code>/notes/17</code> are not possible yet. Use the query string instead."</em></p>
+
+<p>That workaround gave you <code>/note?id=17</code>. It works. It is also why your URLs look like 2004. Fixing it needs one idea: <strong>compile each route pattern into a regular expression with a capture group.</strong></p>
+
+<pre><code><span class="s">'/notes/{id}'</span>   →   <span class="s">'#^/notes/(?P&lt;id&gt;[^/]+)$#'</span></code></pre>
+
+<p>Read the pieces: <code>#…#</code> are delimiters, <code>^</code> and <code>$</code> anchor to the whole string (without them <code>/evil/notes/17</code> would match), <code>(?P&lt;id&gt;…)</code> is a <em>named</em> capture group, and <code>[^/]+</code> means "one or more characters that are not a slash" — so <code>{id}</code> matches one segment, never two.</p>
+
+<h2>Try it</h2>
+
+<div class="widget" id="router">
+  <div class="widget-title">Router — match a request against the table</div>
+  <div style="display:grid;gap:0.6rem;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));margin-bottom:0.8rem">
+    <label style="font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-faint)">Method
+      <select id="rt-method" style="margin-top:0.2rem">
+        <option>GET</option><option>POST</option><option>PATCH</option><option>DELETE</option>
+      </select>
+    </label>
+    <label style="font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-faint);grid-column:span 2">Request URI
+      <input type="text" id="rt-uri" value="/notes/17?edit=1" spellcheck="false" style="margin-top:0.2rem">
+    </label>
+  </div>
+  <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.9rem" class="controls" id="rt-presets"></div>
+  <div id="rt-table"></div>
+  <div id="rt-result" style="margin-top:0.9rem"></div>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — Why order matters, and the 405 nobody implements</span>
+  <p><strong>First match wins</strong>, so specific routes must be registered before general ones. <code>/notes/create</code> has to come before <code>/notes/{id}</code>, or the literal word "create" gets captured as an id. Laravel, Symfony and Express all behave this way, and it is a routine source of confusion.</p>
+  <p><strong>Path matched but method didn't?</strong> That is <code>405 Method Not Allowed</code>, not <code>404</code>. It must carry an <code>Allow</code> header listing the acceptable verbs. Almost no hand-rolled router does this and it costs nothing — collect the methods that matched the path, and if the set is non-empty but your verb isn't in it, answer 405.</p>
+</div>
+
+<h2>The Router class</h2>
+
+<div class="filename">src/Router.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+<span class="k">class</span> Router
+{
+    <span class="k">private array</span> <span class="n">$routes</span> = [];
+
+    <span class="k">public function</span> add(<span class="k">string</span> <span class="n">$method</span>, <span class="k">string</span> <span class="n">$path</span>, <span class="k">string</span> <span class="n">$controller</span>): <span class="k">void</span>
+    {
+        <span class="n">$pattern</span> = preg_replace(
+            <span class="s">'#\{(\w+)\}#'</span>,
+            <span class="s">'(?P&lt;$1&gt;[^/]+)'</span>,
+            <span class="n">$path</span>
+        );
+
+        <span class="n">$this</span>-&gt;routes[] = [
+            <span class="s">'method'</span>     =&gt; <span class="n">$method</span>,
+            <span class="s">'pattern'</span>    =&gt; <span class="s">"#^{$pattern}$#"</span>,
+            <span class="s">'controller'</span> =&gt; <span class="n">$controller</span>,
+        ];
+    }
+
+    <span class="k">public function</span> get(<span class="k">string</span> <span class="n">$p</span>, <span class="k">string</span> <span class="n">$c</span>): <span class="k">void</span>  { <span class="n">$this</span>-&gt;add(<span class="s">'GET'</span>, <span class="n">$p</span>, <span class="n">$c</span>); }
+    <span class="k">public function</span> post(<span class="k">string</span> <span class="n">$p</span>, <span class="k">string</span> <span class="n">$c</span>): <span class="k">void</span> { <span class="n">$this</span>-&gt;add(<span class="s">'POST'</span>, <span class="n">$p</span>, <span class="n">$c</span>); }
+
+    <span class="k">public function</span> dispatch(<span class="k">string</span> <span class="n">$method</span>, <span class="k">string</span> <span class="n">$uri</span>): <span class="k">void</span>
+    {
+        <span class="n">$path</span>    = parse_url(<span class="n">$uri</span>, PHP_URL_PATH) ?: <span class="s">'/'</span>;
+        <span class="n">$allowed</span> = [];
+
+        <span class="k">foreach</span> (<span class="n">$this</span>-&gt;routes <span class="k">as</span> <span class="n">$route</span>) {
+            <span class="k">if</span> (! preg_match(<span class="n">$route</span>[<span class="s">'pattern'</span>], <span class="n">$path</span>, <span class="n">$matches</span>)) {
+                <span class="k">continue</span>;
+            }
+
+            <span class="k">if</span> (<span class="n">$route</span>[<span class="s">'method'</span>] !== <span class="n">$method</span>) {
+                <span class="n">$allowed</span>[] = <span class="n">$route</span>[<span class="s">'method'</span>];
+                <span class="k">continue</span>;
+            }
+
+            <span class="c">// named groups only — drop the numeric duplicates</span>
+            <span class="n">$params</span> = array_filter(
+                <span class="n">$matches</span>,
+                <span class="s">'is_string'</span>,
+                ARRAY_FILTER_USE_KEY
+            );
+
+            <span class="k">require</span> <span class="n">$route</span>[<span class="s">'controller'</span>];
+            <span class="k">return</span>;
+        }
+
+        <span class="k">if</span> (<span class="n">$allowed</span>) {
+            header(<span class="s">'Allow: '</span> . implode(<span class="s">', '</span>, array_unique(<span class="n">$allowed</span>)));
+            abort(405);
+        }
+
+        abort(404);
+    }
+}</code></pre>
+
+<pre><code><span class="n">$router</span> = <span class="k">new</span> Router();
+
+<span class="n">$router</span>-&gt;get(<span class="s">'/'</span>,              <span class="s">'controllers/index.php'</span>);
+<span class="n">$router</span>-&gt;get(<span class="s">'/notes'</span>,         <span class="s">'controllers/notes/index.php'</span>);
+<span class="n">$router</span>-&gt;get(<span class="s">'/notes/create'</span>,  <span class="s">'controllers/notes/create.php'</span>);  <span class="c">// before {id}!</span>
+<span class="n">$router</span>-&gt;get(<span class="s">'/notes/{id}'</span>,     <span class="s">'controllers/notes/show.php'</span>);
+<span class="n">$router</span>-&gt;post(<span class="s">'/notes'</span>,        <span class="s">'controllers/notes/store.php'</span>);
+
+<span class="n">$router</span>-&gt;dispatch(<span class="n">$_SERVER</span>[<span class="s">'REQUEST_METHOD'</span>], <span class="n">$_SERVER</span>[<span class="s">'REQUEST_URI'</span>]);</code></pre>
+
+<div class="callout win">
+  <span class="label">What just changed</span>
+  <p>Compare with your course's version. The route table went from <code>'/about' =&gt; 'controllers/about.php'</code> to a list of objects with a method, a compiled pattern and a handler. That is <strong>structurally what Laravel's <code>routes/web.php</code> is</strong> — <code>Route::get('/notes/{id}', ...)</code> is this exact call, and <code>Illuminate\Routing\Router</code> is this class with caching, middleware, model binding and named routes added.</p>
+  <p>You have not built a toy. You have built the core and left off the features.</p>
+</div>
+
+<h2>The bootstrap, and what belongs in it</h2>
+
+<p>Your course's Chapter 14 hit a real bug: the controller needed <code>$db</code>, but <code>index.php</code> required the router before creating it. The fix was ordering — and the ordering <em>is</em> the bootstrap.</p>
+
+<div class="filename">public/index.php</div>
+<pre><code><span class="k">&lt;?php</span>
+
+declare(strict_types=1);
+
+<span class="k">require</span> __DIR__ . <span class="s">'/../src/functions.php'</span>;   <span class="c">// 1. helpers</span>
+<span class="k">require</span> __DIR__ . <span class="s">'/../src/Database.php'</span>;
+<span class="k">require</span> __DIR__ . <span class="s">'/../src/Router.php'</span>;
+
+<span class="n">$config</span> = <span class="k">require</span> __DIR__ . <span class="s">'/../config.php'</span>;  <span class="c">// 2. configuration</span>
+
+<span class="n">$db</span> = <span class="k">new</span> Database(<span class="n">$config</span>[<span class="s">'database'</span>]);        <span class="c">// 3. shared services</span>
+
+<span class="k">require</span> __DIR__ . <span class="s">'/../routes.php'</span>;            <span class="c">// 4. register routes</span>
+
+<span class="n">$router</span>-&gt;dispatch(                                <span class="c">// 5. dispatch</span>
+    <span class="n">$_SERVER</span>[<span class="s">'REQUEST_METHOD'</span>],
+    <span class="n">$_SERVER</span>[<span class="s">'REQUEST_URI'</span>]
+);</code></pre>
+
+<p>Helpers, config, services, routes, dispatch. <strong>Every framework's bootstrap is these five steps in this order</strong>, and knowing that means you can read an unfamiliar <code>index.php</code> in thirty seconds.</p>
+
+<div class="callout warn">
+  <span class="label">The honest limitation — and what fixes it</span>
+  <p><code>$db</code> reaching controllers through shared scope works and does not scale. A controller depends on a variable it never declares, so you cannot tell what it needs by reading it, and you cannot test it without building the whole world.</p>
+  <p>The fix is <strong>dependency injection</strong>: a component states its needs as constructor parameters and a <em>container</em> supplies them. Project 4 builds a small one. Having felt the limitation first is exactly why Laravel's service container will make sense rather than seeming like ceremony.</p>
+</div>
+
+<div class="widget" data-quiz data-seed="l14">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Registering <code>/notes/{id}</code> before <code>/notes/create</code> breaks the create page. Why?",
+      "options": [
+        "First match wins, so \"create\" is captured as an id",
+        "Literal routes are always evaluated after dynamic ones",
+        "The regex for {id} excludes alphabetic characters",
+        "Two routes on the same prefix cannot both be registered"
+      ],
+      "answer": 0,
+      "why": "<code>[^/]+</code> matches the literal string <code>create</code> perfectly well, and the loop stops at the first match. Register specific routes before general ones — a rule shared by Laravel, Symfony and Express."
+    },
+    {
+      "q": "Why anchor the compiled pattern with <code>^</code> and <code>$</code>?",
+      "options": [
+        "Without them a substring match would succeed",
+        "PCRE requires anchors when using named groups",
+        "They make the expression run measurably faster",
+        "They stop the query string from being included"
+      ],
+      "answer": 0,
+      "why": "Unanchored, <code>#/notes/(?P&lt;id&gt;[^/]+)#</code> matches <em>anywhere</em> in the string — so <code>/evil/notes/17/anything</code> would route to your handler. That is a routing bypass, and anchoring is the fix."
+    },
+    {
+      "q": "A GET-only route is requested with POST. What should the server return?",
+      "options": [
+        "405, with an Allow header listing the verbs",
+        "404, since no route matched this request",
+        "403, because the method is not permitted",
+        "400, because the request was malformed"
+      ],
+      "answer": 0,
+      "why": "The resource exists; the verb is wrong. 405 is the accurate answer and RFC 9110 requires the <code>Allow</code> header with it. Returning 404 here misleads API clients and makes debugging harder for no benefit."
+    },
+    {
+      "q": "Why does the router call <code>parse_url($uri, PHP_URL_PATH)</code> before matching?",
+      "options": [
+        "REQUEST_URI includes the query string",
+        "REQUEST_URI may contain the full origin",
+        "The path must be lowercased before matching",
+        "Percent-encoded characters need decoding first"
+      ],
+      "answer": 0,
+      "why": "Exactly the bug your course hit in Chapter 09: <code>/contact?name=jeffrey</code> matched nothing because the raw <code>REQUEST_URI</code> included <code>?name=jeffrey</code>. Routing decides on the path; the query carries parameters <em>to</em> the route, not part of its identity."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="callout bridge">
+  <span class="label">Bridge — three ways the industry declares routes</span>
+  <p><strong>A route file</strong> — Laravel's <code>routes/web.php</code>, Express's <code>app.get(...)</code>. Everything in one place; easy to audit, and it drifts from the controllers.</p>
+  <p><strong>Attributes/decorators</strong> — Symfony's <code>#[Route('/notes/{id}')]</code> above the method. The route lives next to what it does; you lose the single overview (hence <code>bin/console debug:router</code>).</p>
+  <p><strong>File-system routing</strong> — Next.js's <code>app/notes/[id]/page.tsx</code>, SvelteKit, Astro. The directory tree <em>is</em> the route table. Zero configuration, and the URL structure is now coupled to your folder layout.</p>
+  <p>All three compile down to what you just wrote: patterns, in order, matched against a path. Next's <code>[id]</code> is your <code>{id}</code> — the same capture group with different punctuation.</p>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "Name the five bootstrap steps in order. Then explain how <code>/notes/{id}</code> becomes something a computer can match, and why the anchors matter.",
+  "answer": "<p><strong>Bootstrap:</strong> (1) load helpers and classes; (2) read configuration; (3) construct shared services such as the database connection; (4) register routes; (5) dispatch the current request. Getting 3 before 5 is what fixes the \"undefined variable <code>$db</code>\" bug.</p><p><strong>Compilation:</strong> <code>{id}</code> is replaced by the named capture group <code>(?P&lt;id&gt;[^/]+)</code> — one or more non-slash characters, so it can never swallow a second segment — and the whole thing is wrapped as <code>#^…$#</code>. The anchors force the pattern to match the entire path; without them the regex matches any substring, so <code>/evil/notes/17</code> would route to your handler. That is a routing bypass, not a cosmetic detail.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://symfony.com/doc/current/components/http_kernel.html">Symfony's HttpKernel component</a> — the request→response engine underneath Symfony, Drupal and Shopware. Read the "Resolve the Controller" and "Handle the Request" sections; it is your <code>dispatch()</code> method written properly, and it is small enough to read.
+  <br><br>
+  For the regex itself: <a href="https://www.php.net/manual/en/regexp.reference.subpatterns.php">PCRE named subpatterns</a>.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0014" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Ask me to <em>"add optional segments and typed constraints like <code>{id:\\d+}</code> to the Router"</em>, or <em>"show me how route caching works and why Laravel needs it"</em> — the answer (compiling every pattern on every request is wasteful at 200 routes) makes a real performance concept concrete.
+  </div>
+
+  <div class="nextprev">
+    <a href="0013-templating-and-escaping.html">← 0013 — Templating and Escaping</a>
+    <a href="0015-reading-failure.html">0015 — Reading Failure →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const ROUTES = [
+      { method: "GET", path: "/" },
+      { method: "GET", path: "/notes" },
+      { method: "POST", path: "/notes" },
+      { method: "GET", path: "/notes/create" },
+      { method: "GET", path: "/notes/{id}" },
+      { method: "PATCH", path: "/notes/{id}" },
+      { method: "DELETE", path: "/notes/{id}" },
+      { method: "GET", path: "/users/{user}/notes/{note}" },
+    ];
+
+    const compile = (path) =>
+      new RegExp("^" + path.replace(/\{(\w+)\}/g, "(?<$1>[^/]+)") + "$");
+
+    const methodSelect = document.getElementById("rt-method");
+    const uriInput = document.getElementById("rt-uri");
+    const tableBox = document.getElementById("rt-table");
+    const resultBox = document.getElementById("rt-result");
+    const presets = document.getElementById("rt-presets");
+
+    const paint = () => {
+      const method = methodSelect.value;
+      const uri = uriInput.value.trim() || "/";
+      const path = uri.split("?")[0] || "/";
+
+      let winner = -1;
+      const allowed = [];
+      const rows = ROUTES.map((route, index) => {
+        const match = compile(route.path).exec(path);
+        const pathHit = Boolean(match);
+        const methodHit = route.method === method;
+        if (pathHit && !methodHit) allowed.push(route.method);
+        if (pathHit && methodHit && winner === -1) winner = index;
+        return { route, match, pathHit, methodHit, index };
+      });
+
+      tableBox.innerHTML = rows.map(({ route, pathHit, methodHit, index }) => {
+        const isWinner = index === winner;
+        const skipped = isWinner === false && pathHit && methodHit;
+        const border = isWinner ? "var(--ok)" : pathHit ? "var(--warn)" : "var(--rule)";
+        const bg = isWinner ? "var(--ok-bg)" : "var(--paper)";
+        let status = "path does not match";
+        if (isWinner) status = "✓ MATCH — dispatch here";
+        else if (skipped) status = "would match, but a route above won";
+        else if (pathHit && !methodHit) status = `path matches, method is ${route.method}`;
+        return `<div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;border:1px solid ${border};
+          background:${bg};border-radius:2px;padding:0.28rem 0.5rem;margin:0.14rem 0">
+          <span style="font-family:var(--mono);font-size:0.7rem;color:var(--ink-faint);flex:0 0 1.2rem">${index}</span>
+          <span style="font-family:var(--mono);font-size:0.74rem;flex:0 0 3.6rem;color:${methodHit ? "var(--accent)" : "var(--ink-faint)"}">${route.method}</span>
+          <code style="font-size:0.74rem;flex:0 0 auto">${route.path}</code>
+          <span style="font-family:var(--sans);font-size:0.7rem;color:${isWinner ? "var(--ok)" : "var(--ink-faint)"};margin-left:auto">${status}</span>
+        </div>`;
+      }).join("");
+
+      if (winner >= 0) {
+        const { match, route } = rows[winner];
+        const params = Object.entries(match.groups || {});
+        resultBox.innerHTML =
+          `<div style="font-family:var(--mono);font-size:0.95rem;color:var(--ok)">200 — ${route.method} ${route.path}</div>` +
+          (params.length
+            ? `<div style="margin-top:0.4rem;font-size:0.8rem">captured: ${params.map(([k, v]) =>
+                `<code>$params['${k}'] = '${v}'</code>`).join(" &nbsp; ")}</div>`
+            : `<div style="margin-top:0.4rem;font-size:0.8rem;color:var(--ink-faint)">no dynamic segments</div>`) +
+          (uri.includes("?")
+            ? `<div style="margin-top:0.3rem;font-size:0.78rem;color:var(--ink-soft)">The query string <code>${uri.split("?")[1]}</code> was stripped before matching and lands in <code>$_GET</code>.</div>`
+            : "");
+      } else if (allowed.length) {
+        resultBox.innerHTML =
+          `<div style="font-family:var(--mono);font-size:0.95rem;color:var(--bad)">405 Method Not Allowed</div>
+           <div style="margin-top:0.4rem;font-size:0.8rem">The path exists but not for <code>${method}</code>. Response must include
+           <code>Allow: ${[...new Set(allowed)].join(", ")}</code>.</div>`;
+      } else {
+        resultBox.innerHTML =
+          `<div style="font-family:var(--mono);font-size:0.95rem;color:var(--bad)">404 Not Found</div>
+           <div style="margin-top:0.4rem;font-size:0.8rem;color:var(--ink-soft)">No pattern matched. This is where <code>abort(404)</code> fires.</div>`;
+      }
+    };
+
+    for (const [label, method, uri] of [
+      ["clean URL", "GET", "/notes/17"],
+      ["ordering trap", "GET", "/notes/create"],
+      ["405", "DELETE", "/notes"],
+      ["nested params", "GET", "/users/3/notes/9"],
+      ["query string", "GET", "/notes?sort=desc"],
+      ["404", "GET", "/nope"],
+      ["anchor test", "GET", "/evil/notes/17"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        methodSelect.value = method;
+        uriInput.value = uri;
+        paint();
+      });
+      presets.append(button);
+    }
+
+    methodSelect.addEventListener("change", paint);
+    uriInput.addEventListener("input", paint);
+    paint();
+  })();
+</script>

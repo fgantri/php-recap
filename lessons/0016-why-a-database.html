@@ -1,0 +1,327 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0016 — Why a Database, Not a File</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Sunday · Data, danger, frameworks</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">Lesson 0016</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="../reference/sql-cheatsheet.html">SQL sheet</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>Why a Database, Not a File</h1>
+<p class="subtitle">You can store data in a file. People did, for years. The question is what you would have to build afterwards — and the honest answer is: a database.</p>
+
+<div class="meta"><span>35 minutes</span><span>Win: name the six things you'd have to write yourself</span></div>
+
+<p>Your course listed six properties a database gives you that a file does not. Rather than take them on trust, watch one of them fail.</p>
+
+<h2>Two requests, one file</h2>
+
+<p>A visit counter stored in <code>count.txt</code>. Two requests arrive at nearly the same moment. Step through and watch what each process does.</p>
+
+<div class="widget" id="race">
+  <div class="widget-title">Concurrency — the failure you cannot fix in application code</div>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.9rem" class="controls">
+    <button type="button" id="race-step" class="primary">Step ▸</button>
+    <button type="button" id="race-auto">Interleave them</button>
+    <button type="button" id="race-reset">Reset</button>
+    <label style="display:flex;gap:0.35rem;align-items:center;font-family:var(--sans);font-size:0.78rem">
+      <input type="checkbox" id="race-lock" style="width:auto"> use a database transaction
+    </label>
+  </div>
+  <div style="display:grid;gap:0.7rem;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr))">
+    <div id="race-a"></div>
+    <div id="race-b"></div>
+    <div id="race-store"></div>
+  </div>
+  <p id="race-note" style="font-size:0.82rem;line-height:1.55;color:var(--ink-soft);margin:0.9rem 0 0"></p>
+</div>
+
+<div class="callout danger">
+  <span class="label">The lost update</span>
+  <p>Both processes read <code>41</code>, both compute <code>42</code>, both write <code>42</code>. Two visits, one increment. Nothing errored. No log line. The number is just quietly wrong, and it will be wrong again, unpredictably, forever.</p>
+  <p>This is a <span class="term">race condition</span>, and you cannot fix it with more careful PHP — the gap between read and write exists no matter how you write it. You need something that can make read-modify-write <strong>atomic</strong>. That is what a transaction is, and building one correctly over a plain file means implementing locking, crash recovery and a write-ahead log. At which point you have written a database.</p>
+</div>
+
+<h2>The six properties, and what each replaces</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Property</th><th>What it does</th><th>What you'd write instead</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Concurrency</strong></td><td>Many readers and writers without corruption</td><td>Lock files, and the deadlocks that come with them</td></tr>
+    <tr><td><strong>Transactions</strong></td><td>A group of changes applies entirely or not at all</td><td>Journalling, rollback, crash recovery</td></tr>
+    <tr><td><strong>Indexes</strong></td><td>Find one row among ten million without reading the rest</td><td>A B-tree, kept in sync with every write</td></tr>
+    <tr><td><strong>Query language</strong></td><td>Describe the result; the engine plans how</td><td>Hand-written loops, re-optimised by hand each time</td></tr>
+    <tr><td><strong>Constraints</strong></td><td>Rules the data enforces on itself</td><td>Validation in every code path that ever writes</td></tr>
+    <tr><td><strong>Durability</strong></td><td>Committed data survives a crash mid-write</td><td><code>fsync</code> discipline and a recovery protocol</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout foundation">
+  <span class="label">Foundation — ACID, which is these properties with a name</span>
+  <p><strong>Atomicity</strong> — a transaction is all or nothing. Debit and credit both happen, or neither does.</p>
+  <p><strong>Consistency</strong> — a transaction moves the database from one valid state to another; constraints are never left violated.</p>
+  <p><strong>Isolation</strong> — concurrent transactions do not see each other's half-finished work. This is what defeats the counter above.</p>
+  <p><strong>Durability</strong> — once committed, it survives power loss. Implemented with a <em>write-ahead log</em>: record the intention to disk first, apply it after, so a crash can always be replayed or undone.</p>
+  <p>You will be asked what ACID stands for in interviews. More usefully: each letter is a specific failure it prevents, and you have now watched Isolation fail.</p>
+</div>
+
+<h2>The relational model</h2>
+
+<p>Edgar Codd's 1970 paper proposed something that sounds obvious now and was radical then: store data as <strong>relations</strong> — tables of rows and columns — and let a query language describe what you want, with the system deciding how to get it.</p>
+
+<p>What made it win was not the tables. It was <strong>physical data independence</strong>: your query says <em>what</em>, so the engine is free to change <em>how</em> — add an index, change the join order, use a different algorithm — without you rewriting anything. Every predicted replacement has had to reinvent some version of that, which is why SQL is still here fifty-five years later.</p>
+
+<div class="callout bridge">
+  <span class="label">Bridge — when relational is genuinely the wrong choice</span>
+  <p>Being able to say when <em>not</em> to reach for it is the mark of judgement rather than habit:</p>
+  <p><strong>Redis</strong> — key–value in memory. Sessions, caches, rate limiters, queues. Microsecond reads; durability is optional by design.</p>
+  <p><strong>MongoDB and friends</strong> — document stores. Genuinely useful when documents vary in shape and you rarely join. Frequently chosen to avoid designing a schema, which is a decision that arrives later as a bill.</p>
+  <p><strong>Elasticsearch</strong> — inverted indexes for full-text search and ranking. SQL's <code>LIKE '%term%'</code> cannot use an index and does not rank.</p>
+  <p><strong>SQLite</strong> — relational, but a <em>library</em> writing to one file rather than a server. Enormously underrated: it is the most deployed database in the world, it is what Vercel and Cloudflare's edge SQL products are built on, and for a read-heavy site it is often the right answer.</p>
+  <p>The default should be relational. Departing from it should be a decision you can defend with a specific property you need.</p>
+</div>
+
+<h2>Install checkpoint 3 — and a genuine choice</h2>
+
+<p>This is the first point where a <strong>server</strong> becomes a real question rather than an assumption. You have two honest options.</p>
+
+<div class="grid two">
+  <div class="card">
+    <h4>SQLite — already installed</h4>
+    <p>You added <code>php-sqlite3</code> at checkpoint 2. Nothing more to do.</p>
+    <pre style="margin:0.5rem 0;font-size:0.72rem"><code>$pdo = new PDO('sqlite:' . __DIR__ . '/app.db');</code></pre>
+    <p style="font-size:0.8rem">No process, no port, no password, no <code>service start</code>. The whole database is one file you can copy, commit or delete. <strong>Every concept in the next six lessons — tables, types, keys, joins, indexes, prepared statements, transactions — works identically.</strong></p>
+  </div>
+  <div class="card">
+    <h4>MariaDB — a real server</h4>
+    <pre style="margin:0.5rem 0;font-size:0.72rem"><code>sudo apt install -y mariadb-server php-mysql
+sudo service mariadb start</code></pre>
+    <p style="font-size:0.8rem"><strong><code>mariadb-server</code></strong> is the server process; <strong><code>php-mysql</code></strong> is the client driver PHP needs to speak to it. Two separate things — in production they are usually on different machines.</p>
+    <p style="font-size:0.8rem">Choose this if your course uses MySQL, or a job will.</p>
+  </div>
+</div>
+
+<div class="callout warn">
+  <span class="label">Which should you pick this weekend?</span>
+  <p><strong>Install MariaDB</strong> — your course uses MySQL, so matching it means Monday costs you nothing. But install it knowing it is a <em>choice</em>, not a requirement, and knowing precisely what it adds over SQLite: concurrent <em>writers</em>, network access, and user accounts. Nothing else in these lessons depends on it.</p>
+  <p>That distinction is the whole point of this lesson's install checkpoint. "Do I need a database server, or do I need a database?" are different questions, and XAMPP never let you ask the second one.</p>
+</div>
+
+<h2>Set it up</h2>
+
+<pre><code>sudo service mariadb start
+mysql -u root
+
+CREATE DATABASE myapp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE myapp;
+SHOW TABLES;</code></pre>
+
+<p><em>(WSL has no systemd by default, which is why this is <code>service</code> rather than <code>systemctl</code>.)</em></p>
+
+<p>Three levels, worth keeping straight: the <strong>server</strong> is a process listening on port 3306, exactly like the web server in Lesson 0004. A <strong>database</strong> is a named container inside it. A <strong>table</strong> is a structure inside that. You will type <code>localhost</code> and <code>3306</code> into a DSN in Lesson 0019.</p>
+
+<div class="widget" data-quiz data-seed="l16">
+<script type="application/json">
+{
+  "title": "Check yourself",
+  "questions": [
+    {
+      "q": "Two requests increment a counter in a file. Both read 41, both write 42. Which ACID property was violated?",
+      "options": [
+        "Isolation — they saw each other's unfinished work",
+        "Atomicity — one of the writes was left incomplete",
+        "Durability — a write failed to reach the disk",
+        "Consistency — a constraint was left violated"
+      ],
+      "answer": 0,
+      "why": "Each read a value the other was in the middle of changing. Isolation is the guarantee that concurrent transactions behave as if they ran one after another. Both writes completed fully, so atomicity and durability held."
+    },
+    {
+      "q": "Which property lets a database change how a query runs without you rewriting it?",
+      "options": [
+        "Physical data independence, via a declarative language",
+        "Referential integrity, enforced by foreign keys",
+        "Atomic transactions with rollback support",
+        "Normalisation of tables into separate relations"
+      ],
+      "answer": 0,
+      "why": "You state <em>what</em> you want; the planner chooses <em>how</em>. Adding an index can make a query a hundred times faster with no change to the SQL. That separation is the core of Codd's model and why SQL outlived its predicted replacements."
+    },
+    {
+      "q": "You need sub-millisecond reads for session data that may be lost on restart. Best fit?",
+      "options": [
+        "Redis — in-memory key–value",
+        "MySQL with an index on session_id",
+        "A document store such as MongoDB",
+        "SQLite, since it avoids network latency"
+      ],
+      "answer": 0,
+      "why": "The requirements name Redis exactly: key-based access, in-memory speed, and durability explicitly not required. Using MySQL would work but pays for guarantees you have said you don't need."
+    },
+    {
+      "q": "Why is a lock file an inadequate substitute for transactions?",
+      "options": [
+        "A crash while holding it leaves it locked forever",
+        "Lock files cannot be shared between two processes",
+        "The filesystem does not support atomic creation",
+        "Locks slow reads as much as they slow writes"
+      ],
+      "answer": 0,
+      "why": "That is the beginning of the problem, not the end — you then need timeouts, stale-lock detection, deadlock handling, and recovery of half-applied writes. Each fix is another piece of a database, which is the argument for using one."
+    }
+  ]
+}
+</script>
+</div>
+
+<div class="widget" data-recall>
+<script type="application/json">
+{
+  "title": "Retrieval practice — say it out loud first",
+  "prompt": "A colleague proposes storing orders in a JSON file: \"it's simpler, no server to run\". Give the strongest three-point case against it, and then say honestly when they would be right.",
+  "answer": "<p><strong>1. Concurrency.</strong> Two simultaneous orders will lose one, silently, with no error — the lost-update race. Fixing it means locking, and locking correctly means stale-lock detection and crash recovery.</p><p><strong>2. Atomicity.</strong> An order that decrements stock and records a payment must do both or neither. A crash between two file writes leaves the data permanently inconsistent, with no way to detect which records are affected.</p><p><strong>3. Querying at scale.</strong> \"Orders over €100 last month\" means loading and scanning the entire file. At ten thousand orders it is slow; at a million it is impossible. An index makes it instant and you cannot add one to a JSON file.</p><p><strong>When they'd be right:</strong> single-writer, low-volume, non-critical data — config, a static site's content, a build cache, a personal script. And if they want \"no server to run\", the correct answer is <strong>SQLite</strong>, which is a file <em>and</em> gives all three guarantees.</p>"
+}
+</script>
+</div>
+
+<div class="source">
+  <span class="label">Primary source for this lesson</span>
+  <a href="https://www.seas.upenn.edu/~zives/03f/cis550/codd.pdf">Codd (1970), "A Relational Model of Data for Large Shared Data Banks"</a> — the paper that started it. Read the first two pages; the argument for data independence is stated more clearly there than in any textbook since.
+  <br><br>
+  For the modern practical view, <a href="https://www.sqlite.org/whentouse.html">SQLite's own "When To Use" page</a> is an unusually honest document about the trade-offs of each kind of store.
+</div>
+
+<footer class="lesson-foot">
+  <button data-complete="0016" type="button">Mark this lesson complete</button>
+
+  <div class="ask">
+    <strong>Ask your teacher.</strong> Try: <em>"show me the lost-update race actually happening with two PHP processes"</em> — it's about fifteen lines and genuinely unsettling to watch. Or: <em>"what are transaction isolation levels and which does MySQL use by default?"</em> (REPEATABLE READ, and the reasons are interesting).
+  </div>
+
+  <div class="nextprev">
+    <a href="../projects/02-mini-framework.html">← Project 2</a>
+    <a href="0017-sql-is-declarative.html">0017 — SQL Is Declarative →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
+<script>
+  (() => {
+    const SCRIPT = [
+      { who: "A", text: "open count.txt", store: null },
+      { who: "B", text: "open count.txt", store: null },
+      { who: "A", text: "read → 41", read: "A" },
+      { who: "B", text: "read → 41", read: "B" },
+      { who: "A", text: "compute 41 + 1 = 42" },
+      { who: "B", text: "compute 41 + 1 = 42" },
+      { who: "A", text: "write 42", store: 42 },
+      { who: "B", text: "write 42", store: 42 },
+    ];
+
+    const SAFE = [
+      { who: "A", text: "BEGIN", store: null },
+      { who: "A", text: "SELECT … FOR UPDATE → 41 (row locked)", read: "A" },
+      { who: "B", text: "BEGIN" },
+      { who: "B", text: "SELECT … FOR UPDATE → blocked, waiting", blocked: true },
+      { who: "A", text: "UPDATE counter SET n = 42" },
+      { who: "A", text: "COMMIT — lock released", store: 42 },
+      { who: "B", text: "unblocked, reads → 42", read: "B" },
+      { who: "B", text: "UPDATE → 43, COMMIT", store: 43 },
+    ];
+
+    const state = { step: 0, stored: 41, held: { A: null, B: null } };
+
+    const boxA = document.getElementById("race-a");
+    const boxB = document.getElementById("race-b");
+    const boxStore = document.getElementById("race-store");
+    const note = document.getElementById("race-note");
+    const lock = document.getElementById("race-lock");
+
+    const script = () => (lock.checked ? SAFE : SCRIPT);
+
+    const paint = () => {
+      const steps = script();
+      const done = steps.slice(0, state.step);
+
+      const column = (who, title, colour) => {
+        const lines = done.filter((s) => s.who === who);
+        return `<div style="border:1px solid var(--rule);border-radius:2px;padding:0.5rem 0.6rem;background:var(--paper)">
+          <div style="font-family:var(--sans);font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;color:${colour}">${title}</div>
+          ${lines.length
+            ? lines.map((s) => `<div style="font-family:var(--mono);font-size:0.72rem;margin-top:0.25rem;${
+                s.blocked ? "color:var(--warn)" : ""}">${s.text}</div>`).join("")
+            : `<div style="font-size:0.72rem;color:var(--ink-faint);margin-top:0.25rem">idle</div>`}
+          ${state.held[who] !== null ? `<div style="font-family:var(--sans);font-size:0.68rem;color:var(--accent);margin-top:0.3rem">
+            holds value ${state.held[who]}</div>` : ""}
+        </div>`;
+      };
+
+      boxA.innerHTML = column("A", "request A", "var(--accent)");
+      boxB.innerHTML = column("B", "request B", "var(--link)");
+
+      const wrong = !lock.checked && state.step >= steps.length;
+      boxStore.innerHTML = `<div style="border:1px solid ${wrong ? "var(--bad)" : "var(--rule)"};border-radius:2px;
+        padding:0.5rem 0.6rem;background:${wrong ? "var(--bad-bg)" : "var(--paper)"}">
+        <div style="font-family:var(--sans);font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-faint)">
+          ${lock.checked ? "counter row" : "count.txt"}</div>
+        <div style="font-family:var(--mono);font-size:1.5rem;margin-top:0.2rem;color:${wrong ? "var(--bad)" : "var(--ink)"}">${state.stored}</div>
+        <div style="font-family:var(--sans);font-size:0.68rem;color:var(--ink-faint);margin-top:0.2rem">
+          2 visits recorded${state.step >= steps.length ? ` → counter says ${state.stored}` : ""}</div>
+      </div>`;
+
+      if (state.step >= steps.length) {
+        note.innerHTML = lock.checked
+          ? `<strong style="color:var(--ok)">43 — correct.</strong> <code>SELECT … FOR UPDATE</code> locked the row, so B was made to <em>wait</em> until A committed, then read the value A had written. The reads were serialised; the arithmetic could not overlap. That is <strong>Isolation</strong>, and no application code was needed to get it.`
+          : `<strong style="color:var(--bad)">42 — wrong.</strong> Two visits produced one increment. Both processes read 41 before either wrote, so the second write overwrote the first with the same number. <strong>Nothing errored.</strong> Tick the transaction box and step through again.`;
+      } else {
+        note.innerHTML = `Press Step to advance. Watch when each process <em>reads</em> relative to when the other <em>writes</em> — that gap is the entire bug.`;
+      }
+    };
+
+    const step = () => {
+      const steps = script();
+      if (state.step >= steps.length) return;
+      const current = steps[state.step];
+      if (current.read) state.held[current.read] = state.stored;
+      if (current.store !== null && current.store !== undefined) state.stored = current.store;
+      state.step += 1;
+      paint();
+    };
+
+    const reset = () => {
+      state.step = 0;
+      state.stored = 41;
+      state.held = { A: null, B: null };
+      paint();
+    };
+
+    document.getElementById("race-step").addEventListener("click", step);
+    document.getElementById("race-auto").addEventListener("click", () => {
+      reset();
+      const steps = script();
+      let i = 0;
+      const timer = setInterval(() => {
+        step();
+        if (++i >= steps.length) clearInterval(timer);
+      }, 320);
+    });
+    document.getElementById("race-reset").addEventListener("click", reset);
+    lock.addEventListener("change", reset);
+
+    paint();
+  })();
+</script>

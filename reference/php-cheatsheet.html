@@ -1,0 +1,247 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHP Cheat Sheet</title>
+<link rel="stylesheet" href="../assets/course.css">
+
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <div class="kicker">Reference</div>
+    <strong style="font-family:var(--sans);font-size:0.95rem">PHP</strong>
+  </div>
+  <nav>
+    <a href="../START-HERE.html">Syllabus</a>
+    <a href="glossary.html">Glossary</a>
+    <a href="#" onclick="window.print();return false">Print</a>
+    <button id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </nav>
+</header>
+
+<h1>PHP Cheat Sheet</h1>
+<p class="subtitle">Syntax, superglobals, arrays, PDO — and the traps, which are the part worth rereading.</p>
+
+<h2>Tags and structure</h2>
+
+<pre><code>&lt;?php … ?&gt;        <span class="c">// code block; everything outside passes through</span>
+&lt;?= $v ?&gt;         <span class="c">// short echo — the standard way to output in a template</span>
+                  <span class="c">// omit the closing ?&gt; in PHP-only files (stray bytes break headers)</span>
+
+declare(strict_types=1);   <span class="c">// first statement. use it in every file</span></code></pre>
+
+<h2>Alternative syntax — use in views</h2>
+
+<pre><code>&lt;?php if ($read): ?&gt;   … &lt;?php else: ?&gt;   … &lt;?php endif; ?&gt;
+&lt;?php foreach ($books as $book): ?&gt;   … &lt;?php endforeach; ?&gt;
+&lt;?php while (…): ?&gt;   … &lt;?php endwhile; ?&gt;</code></pre>
+
+<p>Convention: <strong>braces in logic files, colons in view files.</strong></p>
+
+<h2>Types</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Type</th><th>Example</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td>string</td><td><code>'a'</code>, <code>"hi $n"</code></td><td>Byte array. <code>strlen</code>=bytes, <code>mb_strlen</code>=characters</td></tr>
+    <tr><td>int</td><td><code>25</code></td><td>Platform width, usually 64-bit</td></tr>
+    <tr><td>float</td><td><code>19.99</code></td><td><strong>Never for money</strong> — use integer cents or DECIMAL</td></tr>
+    <tr><td>bool</td><td><code>true</code></td><td>Unquoted. <code>'false'</code> is a truthy string</td></tr>
+    <tr><td>array</td><td><code>['a','b']</code></td><td>Ordered hash map — list and dictionary in one</td></tr>
+    <tr><td>null</td><td><code>null</code></td><td>Absence of a value</td></tr>
+    <tr><td>object</td><td><code>new Foo</code></td><td>Variable holds a <em>handle</em></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Strings</h2>
+
+<pre><code>'literal $x'          <span class="c">// no interpolation — a stronger statement of intent</span>
+"interpolated $x"     <span class="c">// evaluates variables</span>
+"{$book['name']}TM"   <span class="c">// braces isolate the name from what follows</span>
+'a' . 'b'             <span class="c">// concatenation is a DOT, never +</span>
+&lt;&lt;&lt;HTML … HTML;       <span class="c">// heredoc (interpolates) / &lt;&lt;&lt;'X' nowdoc (literal)</span></code></pre>
+
+<h2>Comparison — the reference table</h2>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Expression</th><th><code>==</code></th><th><code>===</code></th></tr></thead>
+  <tbody>
+    <tr><td><code>'1' , 1</code></td><td>true</td><td>false</td></tr>
+    <tr><td><code>'abc' , 0</code></td><td>false <span style="color:var(--ink-faint)">(true before PHP 8)</span></td><td>false</td></tr>
+    <tr><td><code>null , false</code></td><td>true</td><td>false</td></tr>
+    <tr><td><code>'' , null</code></td><td>true</td><td>false</td></tr>
+    <tr><td><code>'0' , false</code></td><td>true</td><td>false</td></tr>
+    <tr><td><code>'10' , '1e1'</code></td><td>true</td><td>false</td></tr>
+    <tr><td><code>[] , false</code></td><td>true</td><td>false</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Falsy, exhaustively:</strong> <code>false</code> <code>0</code> <code>0.0</code> <code>-0.0</code> <code>''</code> <code>'0'</code> <code>[]</code> <code>null</code>. Everything else is truthy. <strong>Default to <code>===</code>.</strong></p>
+
+<pre><code>$a ?? $b       <span class="c">// null/undefined → $b. no warning. PREFER THIS</span>
+$a ?: $b       <span class="c">// any falsy → $b. eats a legitimate 0</span>
+$a ??= $b      <span class="c">// assign if not set</span>
+$o?-&gt;m()       <span class="c">// null instead of an error</span></code></pre>
+
+<h2>Arrays</h2>
+
+<pre><code>$a = ['x' =&gt; 1, 'y' =&gt; 2];
+$a[] = $v;                       <span class="c">// append, next integer key</span>
+$a['k'] ?? 'default';            <span class="c">// safe read</span>
+[$x, $y] = $pair;                <span class="c">// destructuring</span>
+['x' =&gt; $x] = $a;                <span class="c">// keyed destructuring</span>
+$merged = [...$a, ...$b];        <span class="c">// spread (8.1+ for string keys)</span></code></pre>
+
+<div class="table-scroll wide">
+<table>
+  <thead><tr><th>Function</th><th>Cost</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td><code>count($a)</code></td><td>O(1)</td><td>Stored — safe in a loop condition</td></tr>
+    <tr><td><code>isset($a[$k])</code></td><td>O(1)</td><td>False for a null value</td></tr>
+    <tr><td><code>array_key_exists($k,$a)</code></td><td>O(1)</td><td>True even when the value is null</td></tr>
+    <tr><td><code>in_array($v,$a,true)</code></td><td><strong>O(n)</strong></td><td>Pass <code>true</code>! Default is loose comparison</td></tr>
+    <tr><td><code>array_flip</code> + <code>isset</code></td><td>O(1) each</td><td>The fix for repeated <code>in_array</code> in a loop</td></tr>
+    <tr><td><code>array_map($fn,$a)</code></td><td>O(n)</td><td>Callback <strong>first</strong></td></tr>
+    <tr><td><code>array_filter($a,$fn)</code></td><td>O(n)</td><td>Array <strong>first</strong>. <em>Preserves keys</em></td></tr>
+    <tr><td><code>array_values($a)</code></td><td>O(n)</td><td>Renumber and repack — use after filter</td></tr>
+    <tr><td><code>array_reduce($a,$fn,$init)</code></td><td>O(n)</td><td>Collapse to one value</td></tr>
+    <tr><td><code>array_column($a,'name','id')</code></td><td>O(n)</td><td>Pluck a column; optionally key by another</td></tr>
+    <tr><td><code>usort($a,$fn)</code></td><td>O(n log n)</td><td>In place. Return −1 / 0 / 1, or use <code>&lt;=&gt;</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout danger">
+  <span class="label">Three array traps</span>
+  <p><strong>1.</strong> <code>array_filter</code> preserves keys → <code>json_encode</code> emits an object <code>{"2":…}</code> instead of an array. Wrap in <code>array_values()</code>.</p>
+  <p><strong>2.</strong> <code>in_array</code> defaults to <em>loose</em> comparison. Always pass <code>true</code> as the third argument.</p>
+  <p><strong>3.</strong> After <code>foreach ($a as &amp;$v)</code>, always <code>unset($v);</code> — otherwise the next loop overwrites the last element repeatedly.</p>
+</div>
+
+<h2>Functions and closures</h2>
+
+<pre><code>function f(int $a, string $b = 'x', ...$rest): ?array { }
+
+$fn  = function ($x) use ($captured) { … };   <span class="c">// explicit capture, by value</span>
+$fn  = function ($x) use (&amp;$live) { … };      <span class="c">// by reference — rarely right</span>
+$fn  = fn ($x) =&gt; $x * $captured;             <span class="c">// auto-capture, by value, one expression</span>
+$ref = strlen(...);                            <span class="c">// first-class callable (8.1+)</span></code></pre>
+
+<p>PHP functions <strong>cannot</strong> see enclosing scope. Pass it in, or capture it explicitly.</p>
+
+<h2>Classes</h2>
+
+<pre><code>final class Note
+{
+    public const STATUS_DRAFT = 'draft';       <span class="c">// UPPER_SNAKE, via ::</span>
+
+    public function __construct(
+        public readonly int $id,               <span class="c">// promoted + immutable (8.1+)</span>
+        private string $body = '',
+    ) {}
+
+    public function body(): string { return $this-&gt;body; }
+
+    public static function make(int $id): self { return new self($id); }
+}
+
+$n = new Note(1, 'hello');
+echo $n-&gt;id;                  <span class="c">// no $ after the arrow</span>
+echo Note::STATUS_DRAFT;      <span class="c">// :: reaches into the class itself</span></code></pre>
+
+<p><code>public</code> anywhere · <code>protected</code> this class and subclasses · <code>private</code> this class only.</p>
+
+<h2>Superglobals</h2>
+
+<div class="table-scroll wide">
+<table>
+  <tbody>
+    <tr><td><code>$_SERVER</code></td><td>Request and server info — CGI variable names</td></tr>
+    <tr><td><code>$_GET</code></td><td><strong>The query string</strong>, parsed — regardless of method</td></tr>
+    <tr><td><code>$_POST</code></td><td>Form-encoded body. Empty for JSON bodies — use <code>file_get_contents('php://input')</code></td></tr>
+    <tr><td><code>$_COOKIE</code></td><td>Cookies the browser sent</td></tr>
+    <tr><td><code>$_SESSION</code></td><td>Server-side, after <code>session_start()</code></td></tr>
+    <tr><td><code>$_FILES</code></td><td>Uploads</td></tr>
+    <tr><td><code>$_REQUEST</code></td><td>Merged GET/POST/cookie — <strong>avoid</strong>, the ambiguity causes bugs</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Everything except <code>$_SESSION</code> and <code>$_ENV</code> is attacker-controlled.</strong></p>
+
+<h2>PDO</h2>
+
+<pre><code>$dsn = 'mysql:host=localhost;port=3306;dbname=myapp;charset=utf8mb4';
+
+$pdo = new PDO($dsn, $user, $pass, [
+    PDO::ATTR_ERRMODE            =&gt; PDO::ERRMODE_EXCEPTION,  <span class="c">// throw, don't fail quietly</span>
+    PDO::ATTR_DEFAULT_FETCH_MODE =&gt; PDO::FETCH_ASSOC,        <span class="c">// no duplicate numeric keys</span>
+    PDO::ATTR_EMULATE_PREPARES   =&gt; false,                   <span class="c">// real prepares; native types back</span>
+]);
+
+<span class="c">// named — clearer past two parameters</span>
+$stmt = $pdo-&gt;prepare('SELECT * FROM notes WHERE user_id = :uid AND id = :id');
+$stmt-&gt;execute(['uid' =&gt; $uid, 'id' =&gt; $id]);
+
+$row  = $stmt-&gt;fetch();       <span class="c">// one row, or FALSE when none</span>
+$rows = $stmt-&gt;fetchAll();    <span class="c">// array of rows, [] when none</span>
+$id   = $pdo-&gt;lastInsertId();
+$n    = $stmt-&gt;rowCount();    <span class="c">// affected rows for INSERT/UPDATE/DELETE</span></code></pre>
+
+<div class="callout danger">
+  <span class="label">The three settings above are not optional</span>
+  <p><code>ERRMODE_EXCEPTION</code> — without it, a failed query returns <code>false</code> and your code carries on with nonsense.</p>
+  <p><code>EMULATE_PREPARES => false</code> — with emulation on, integer columns come back as <strong>strings</strong>, so <code>$row['user_id'] !== $currentUserId</code> is true even for the rightful owner. This silently breaks ownership checks.</p>
+  <p><code>fetch()</code> returns <code>false</code> when there is no row — a boolean where you expected an array. Handle it immediately: <code>if (! $row) { abort(404); }</code></p>
+</div>
+
+<p><strong>Placeholders bind values, never identifiers.</strong> Table and column names cannot be parameterised — validate them against an explicit allowlist.</p>
+
+<h2>Output and escaping</h2>
+
+<pre><code>function e(?string $v): string {
+    return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8');
+}
+
+&lt;?= e($note['body']) ?&gt;                    <span class="c">// HTML text</span>
+&lt;input value="&lt;?= e($name) ?&gt;"&gt;            <span class="c">// attribute — ALWAYS quote it</span>
+?q=&lt;?= urlencode($q) ?&gt;                    <span class="c">// URL parameter</span>
+&lt;script&gt;const x = &lt;?= json_encode($v, JSON_HEX_TAG|JSON_HEX_AMP) ?&gt;;&lt;/script&gt;</code></pre>
+
+<h2>Files and views</h2>
+
+<pre><code>require  <span class="c">// fatal if missing; loads every time</span>
+require_once / include_once   <span class="c">// loads at most once — use for functions and classes</span>
+include  <span class="c">// warning if missing; execution continues</span>
+
+$config = require 'config.php';   <span class="c">// a required file can RETURN a value</span>
+
+ob_start(); require $view; $html = ob_get_clean();   <span class="c">// capture output as a string</span></code></pre>
+
+<h2>Debugging</h2>
+
+<pre><code>function dd($v) { echo '&lt;pre&gt;'; var_dump($v); echo '&lt;/pre&gt;'; die(); }
+
+var_dump($v)    <span class="c">// types, lengths, structure</span>
+print_r($v)     <span class="c">// readable, no types</span>
+var_export($v)  <span class="c">// valid PHP source — paste into a test</span>
+error_log($m)   <span class="c">// when output would break the response</span>
+
+php -l file.php                 <span class="c">// syntax check without running</span>
+php -d display_errors=1 -d error_reporting=E_ALL file.php
+php -a                          <span class="c">// interactive shell</span>
+php -S localhost:8888 -t public <span class="c">// dev server with a document root</span></code></pre>
+
+<footer class="lesson-foot">
+  <div class="nextprev">
+    <a href="shell-cheatsheet.html">← Shell cheat sheet</a>
+    <a href="sql-cheatsheet.html">SQL cheat sheet →</a>
+  </div>
+</footer>
+
+</div>
+
+<script src="../assets/widgets.js"></script>
